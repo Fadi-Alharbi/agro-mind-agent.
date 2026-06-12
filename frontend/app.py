@@ -101,61 +101,62 @@ st.markdown("""
 
   /* === Product cards === */
   .product-card {
-    background: linear-gradient(135deg, #0d2137, #1b3a4b);
-    border: 1px solid rgba(76,175,80,0.4);
+    background: #ffffff;
+    border: 1px solid #e0e0e0;
     border-radius: 12px;
     padding: 16px 20px;
     margin: 12px 0;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
     transition: all 0.2s ease;
+    color: #263238;
   }
   .product-card:hover {
-    border-color: rgba(76,175,80,0.8);
-    box-shadow: 0 6px 24px rgba(76,175,80,0.2);
+    border-color: #81c784;
+    box-shadow: 0 6px 16px rgba(76,175,80,0.15);
     transform: translateY(-2px);
   }
   .product-id {
     font-size: 0.75rem;
-    color: #81c784;
+    color: #78909c;
     font-weight: 600;
     letter-spacing: 1px;
     text-transform: uppercase;
   }
   .product-name {
-    font-size: 1.1rem;
+    font-size: 1.2rem;
     font-weight: 700;
-    color: #a5d6a7;
+    color: #1b5e20;
     margin: 4px 0;
   }
   .product-type-badge {
     display: inline-block;
-    background: rgba(76,175,80,0.2);
-    border: 1px solid rgba(76,175,80,0.4);
+    background: #e8f5e9;
+    border: 1px solid #a5d6a7;
     border-radius: 20px;
     padding: 2px 10px;
     font-size: 0.75rem;
-    color: #81c784;
+    color: #2e7d32;
     margin: 4px 0;
   }
   .price-group {
     font-size: 1.3rem;
     font-weight: 700;
-    color: #ff7043;
+    color: #e65100;
     margin: 8px 0 2px 0;
   }
   .price-single {
     font-size: 0.9rem;
-    color: #b0bec5;
+    color: #78909c;
     text-decoration: line-through;
   }
   .dosage-info {
-    background: rgba(0,0,0,0.25);
+    background: #f5f5f5;
     border-radius: 8px;
-    padding: 8px 12px;
+    padding: 10px 14px;
     margin-top: 10px;
     font-size: 0.85rem;
-    color: #b2dfdb;
-    border-left: 3px solid #4caf50;
+    color: #37474f;
+    border-left: 4px solid #66bb6a;
   }
 
   /* === Safety banner === */
@@ -268,7 +269,7 @@ st.markdown("""
 
 # ── Session state initialisation ───────────────────────────────────────────────
 if "session_id" not in st.session_state:
-    st.session_state.session_id = str(uuid.uuid4())
+    st.session_state.session_id = "guest"
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "uploaded_image" not in st.session_state:
@@ -301,14 +302,14 @@ def _render_product_card(product: dict) -> str:
 
     return f"""
     <div class="product-card">
-      <div class="product-id">{pid}</div>
+      <div class="product-id">📦 {pid}</div>
       <div class="product-name">🌱 {name}</div>
       <span class="product-type-badge">{ptype}</span>
-      <div style="margin-top:8px;font-size:0.82rem;color:#90a4ae;">
-        <strong style="color:#80cbc4;">Crops:</strong> {crops}<br>
-        <strong style="color:#80cbc4;">Ingredients:</strong> {ingredients}
+      <div style="margin-top:8px;font-size:0.85rem;color:#546e7a;">
+        <strong style="color:#2e7d32;">🌾 Crops:</strong> {crops}<br>
+        <strong style="color:#2e7d32;">🧪 Ingredients:</strong> {ingredients}
       </div>
-      <div class="price-group">¥{gp:.0f} <span style="font-size:0.8rem;font-weight:400;color:#ff8a65;">group</span></div>
+      <div class="price-group">¥{gp:.0f} <span style="font-size:0.8rem;font-weight:400;color:#f4511e;">group</span></div>
       <div class="price-single">Single: ¥{sp:.0f}</div>
       <div class="dosage-info">
         <strong>📋 Dosage:</strong> {dosage}
@@ -372,10 +373,18 @@ def _check_backend() -> bool:
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("## 🌿 Agro-Mind AI")
+    st.markdown("### 👤 User Login")
+    login_id = st.text_input("Enter Name or Phone", value="" if st.session_state.session_id == "guest" else st.session_state.session_id)
+    if st.button("Login / Switch User", use_container_width=True):
+        if login_id and login_id.strip():
+            if login_id.strip() != st.session_state.session_id:
+                st.session_state.session_id = login_id.strip()
+                st.session_state.messages = []
+                st.rerun()
+                
     st.markdown("---")
-
-    # Backend status
+    
+    st.markdown("### 🔌 System Status")
     backend_ok = _check_backend()
     status_color = "#4caf50" if backend_ok else "#ef5350"
     status_label = "Connected" if backend_ok else "Offline"
@@ -388,23 +397,7 @@ with st.sidebar:
     )
 
     st.markdown("### 📸 Image Upload")
-    uploaded_file = st.file_uploader(
-        "Upload crop/leaf photo for diagnosis",
-        type=["jpg", "jpeg", "png", "webp"],
-        label_visibility="collapsed",
-    )
-    if uploaded_file:
-        st.session_state.uploaded_image = uploaded_file.read()
-        st.image(
-            BytesIO(st.session_state.uploaded_image),
-            caption="Uploaded image",
-            use_container_width=True,
-        )
-        if st.button("🗑️ Remove image", key="remove_img"):
-            st.session_state.uploaded_image = None
-            st.rerun()
-    else:
-        st.session_state.uploaded_image = None
+    st.markdown("<span style='font-size:0.85rem;color:#80cbc4;'>Please use the attachment button in the main chat box to upload an image.</span>", unsafe_allow_html=True)
 
     st.markdown("---")
     st.markdown("### 📦 Order Tracking")
@@ -461,6 +454,40 @@ with col_main:
       <p>Your intelligent agricultural support on Pinduoduo — crop diagnosis, product recommendations, and order management.</p>
     </div>
     """, unsafe_allow_html=True)
+
+    # ── Main Chat Layout ────────────────────────────────────────────────────────────
+
+    # Auto-trigger INIT_SESSION on new load
+    if not st.session_state.messages:
+        try:
+            response_data = _send_message(message="INIT_SESSION", image_bytes=None, order_id=None)
+            if response_data.get("response_text"):
+                # If backend returns a greeting/proactive message, display it
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": response_data["response_text"],
+                    "ts": datetime.now().strftime("%H:%M"),
+                    "intent": response_data.get("intent", "greeting")
+                })
+        except Exception:
+            pass
+
+    # Display proactive banner if backend passed active_treatments 
+    try:
+        import sqlite3
+        import json
+        conn = sqlite3.connect("db/agromind.db")
+        cur = conn.cursor()
+        cur.execute("SELECT profile_data FROM customers WHERE id=?", (st.session_state.session_id,))
+        row = cur.fetchone()
+        conn.close()
+        if row and row[0]:
+            profile = json.loads(row[0])
+            treatments = profile.get("active_treatments", [])
+            if treatments:
+                st.info(f"📅 **Active Treatments Reminder:**\n\n" + "\n".join(f"- {t}" for t in treatments))
+    except Exception as e:
+        pass
 
     # ── Chat history display ───────────────────────────────────────────────────
     chat_container = st.container()
@@ -520,6 +547,34 @@ with col_main:
                     if products:
                         for prod in products[:2]:
                             st.markdown(_render_product_card(prod), unsafe_allow_html=True)
+                            
+                            # Interactive "Add to Cart" Controls
+                            prod_id = prod.get('product_id', str(uuid.uuid4())[:6])
+                            prod_name = prod.get('product_name', 'Product')
+                            
+                            # Use container for a clean layout below the card
+                            with st.container():
+                                col_qty, col_btn1, col_btn2 = st.columns([1, 2, 2])
+                                with col_qty:
+                                    qty = st.number_input("Qty", min_value=1, max_value=100, value=1, key=f"qty_{ts}_{prod_id}", label_visibility="collapsed")
+                                with col_btn1:
+                                    if st.button(f"🛒 Add {qty} to Cart", key=f"btn_{ts}_{prod_id}", use_container_width=True):
+                                        st.session_state.messages.append({
+                                            "role": "assistant",
+                                            "content": f"✅ Successfully added **{qty}x {prod_name}** to your cart! You can view it in your order summary.",
+                                            "ts": datetime.now().strftime("%H:%M"),
+                                            "data": {"intent": "logistics"}
+                                        })
+                                        st.rerun()
+                                with col_btn2:
+                                    if st.button("👥 Start Group Purchase", key=f"btn_grp_{ts}_{prod_id}", use_container_width=True):
+                                        st.session_state.messages.append({
+                                            "role": "assistant",
+                                            "content": f"🎉 You've started a group purchase for **{prod_name}**! Share the link with friends to get the discounted price.",
+                                            "ts": datetime.now().strftime("%H:%M"),
+                                            "data": {"intent": "logistics"}
+                                        })
+                                        st.rerun()
 
     # ── Input area ─────────────────────────────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
@@ -536,9 +591,24 @@ with col_main:
             label_visibility="collapsed",
             key="user_input",
         )
-        submit = st.form_submit_button("Send ➤", use_container_width=True)
+        
+        col_img, col_btn = st.columns([8, 2])
+        with col_img:
+            uploaded_file = st.file_uploader(
+                "Upload Image (Optional)",
+                type=["jpg", "jpeg", "png", "webp"],
+                label_visibility="collapsed",
+                key="inline_uploader"
+            )
+        with col_btn:
+            # Add some vertical spacing to align button with uploader
+            st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
+            submit = st.form_submit_button("Send ➤", use_container_width=True)
 
-    if submit and user_input.strip():
+    if submit and (user_input.strip() or uploaded_file):
+        if uploaded_file:
+            st.session_state.uploaded_image = uploaded_file.read()
+            
         ts_now = datetime.now().strftime("%H:%M")
         # Record user turn
         st.session_state.messages.append({
