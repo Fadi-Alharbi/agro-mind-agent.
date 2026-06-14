@@ -2,10 +2,10 @@
 agent/orchestrator.py
 ─────────────────────
 AgroMindAgent — single-agent, multimodal, 4-stage pipeline.
-Powered by OpenAI gpt-4o (text + vision).
+Powered by Qwen through DashScope's OpenAI-compatible API.
 
 Stage 1 → Safety Intercept  (pre-LLM, keyword/regex)
-Stage 2 → Intent Classification  (OpenAI call)
+Stage 2 → Intent Classification  (Qwen call)
 Stage 3 → Branch Handler  (diagnosis | logistics | product_rec | general_qa)
 Stage 4 → Memory Write  (async, non-blocking)
 """
@@ -22,13 +22,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+import httpx
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from openai import OpenAI
-
 from safety.interceptor import SafetyInterceptor
+from safety.escalation_log import record_escalation
 from memory.customer_memory import CustomerMemory
 from rag.catalog_loader import search_catalog, all_products_summary, get_product_by_id
 from agent.prompts import (
@@ -45,11 +45,15 @@ from agent.prompts import (
 
 logger = logging.getLogger("agro_mind")
 
-# ── OpenAI configuration ───────────────────────────────────────────────────────
-_API_KEY = os.getenv("OPENAI_API_KEY", "")
-_MODEL_NAME = os.getenv("OPENAI_MODEL", "gpt-4o")
-
-_client = OpenAI(api_key=_API_KEY) if _API_KEY else None
+# ── Qwen configuration ─────────────────────────────────────────────────────────
+_API_KEY = os.getenv("QWEN_API_KEY") or os.getenv("DASHSCOPE_API_KEY") or ""
+_BASE_URL = os.getenv(
+    "QWEN_BASE_URL",
+    "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+).rstrip("/")
+_CHAT_COMPLETIONS_URL = f"{_BASE_URL}/chat/completions"
+_TEXT_MODEL_NAME = os.getenv("QWEN_MODEL", "qwen-plus")
+_VISION_MODEL_NAME = os.getenv("QWEN_VISION_MODEL", "qwen-vl-plus")
 
 
 # ── Response contract ──────────────────────────────────────────────────────────
@@ -131,7 +135,7 @@ def _safety_response(safety_result, session_id: str) -> AgentResponse:
 # ── JSON extraction helper ─────────────────────────────────────────────────────
 
 def _extract_json(text: str) -> dict:
-    """Extract a JSON object from an OpenAI response that may include markdown fences."""
+    """Extract a JSON object from a model response that may include markdown fences."""
     try:
         return json.loads(text.strip())
     except json.JSONDecodeError:
@@ -154,35 +158,63 @@ def _extract_json(text: str) -> dict:
     raise ValueError(f"Could not parse JSON from response: {text[:300]}")
 
 
-# ── OpenAI call helpers ────────────────────────────────────────────────────────
+# ── Qwen call helpers ──────────────────────────────────────────────────────────
 
-async def _openai_chat(messages: list[dict], temperature: float = 0.3) -> str:
-    """Async wrapper around the synchronous OpenAI client."""
-    loop = asyncio.get_event_loop()
-
-    def _call():
-        response = _client.chat.completions.create(
-            model=_MODEL_NAME,
-            messages=messages,
-            temperature=temperature,
-            response_format={"type": "json_object"},
+def _check_api_key() -> None:
+    """Validate the API key before it reaches an HTTP header (ASCII-only)."""
+    if not _API_KEY:
+        raise RuntimeError(
+            "QWEN_API_KEY (or DASHSCOPE_API_KEY) is not configured. "
+            "Set your real key in the .env file."
         )
-        return response.choices[0].message.content
+    if not _API_KEY.isascii():
+        raise RuntimeError(
+            "API key contains non-ASCII characters — you likely copied the "
+            "placeholder value from .env.example without replacing it. "
+            "Put your real Qwen/DashScope key in .env."
+        )
 
-    return await loop.run_in_executor(None, _call)
+
+async def _qwen_completion(payload: dict) -> str:
+    _check_api_key()
+
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.post(
+            _CHAT_COMPLETIONS_URL,
+            headers={
+                "Authorization": f"Bearer {_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+        response.raise_for_status()
+
+    data = response.json()
+    return data["choices"][0]["message"]["content"]
 
 
-async def _openai_chat_vision(
+async def _qwen_chat(messages: list[dict], temperature: float = 0.3) -> str:
+    """Call Qwen's OpenAI-compatible chat endpoint."""
+    return await _qwen_completion(
+        {
+            "model": _TEXT_MODEL_NAME,
+            "messages": messages,
+            "temperature": temperature,
+            "response_format": {"type": "json_object"},
+        }
+    )
+
+
+async def _qwen_chat_vision(
     system_prompt: str, user_text: str, image_bytes: bytes, temperature: float = 0.3
 ) -> str:
-    """Async wrapper for vision (image + text) OpenAI call."""
-    loop = asyncio.get_event_loop()
+    """Call Qwen vision with image + text input."""
     b64_image = base64.b64encode(image_bytes).decode("utf-8")
 
-    def _call():
-        response = _client.chat.completions.create(
-            model=_MODEL_NAME,
-            messages=[
+    return await _qwen_completion(
+        {
+            "model": _VISION_MODEL_NAME,
+            "messages": [
                 {"role": "system", "content": system_prompt},
                 {
                     "role": "user",
@@ -195,29 +227,33 @@ async def _openai_chat_vision(
                     ],
                 },
             ],
-            temperature=temperature,
-            response_format={"type": "json_object"},
-        )
-        return response.choices[0].message.content
-
-    return await loop.run_in_executor(None, _call)
+            "temperature": temperature,
+            "response_format": {"type": "json_object"},
+        }
+    )
 
 
 # ── Main Agent ─────────────────────────────────────────────────────────────────
 
 class AgroMindAgent:
     """
-    Single-agent multimodal customer support system powered by OpenAI gpt-4o.
+    Single-agent multimodal customer support system powered by Qwen.
     """
 
     def __init__(self) -> None:
         self._interceptor = SafetyInterceptor()
         self._catalog_summary = all_products_summary()
 
-        if not _client:
-            logger.warning("⚠️  OPENAI_API_KEY not set — agent will return errors for LLM calls.")
+        if not _API_KEY:
+            logger.warning(
+                "⚠️  QWEN_API_KEY/DASHSCOPE_API_KEY not set — agent will return errors for LLM calls."
+            )
 
-        logger.info("🌿 AgroMindAgent initialized | model=%s", _MODEL_NAME)
+        logger.info(
+            "🌿 AgroMindAgent initialized | text_model=%s vision_model=%s",
+            _TEXT_MODEL_NAME,
+            _VISION_MODEL_NAME,
+        )
 
     # ── Public entry point ─────────────────────────────────────────────────────
 
@@ -236,6 +272,12 @@ class AgroMindAgent:
         safety_result = self._interceptor.check(user_text)
         if not safety_result.is_safe:
             logger.warning("Safety flag [%s]: %s", safety_result.risk_category, safety_result.triggered_phrase)
+            record_escalation(
+                session_id=session_id,
+                risk_category=safety_result.risk_category,
+                triggered_phrase=safety_result.triggered_phrase,
+                human_summary=safety_result.human_summary_brief,
+            )
             response = _safety_response(safety_result, session_id)
             mem.append_turn("assistant", response.response_text)
             mem.update(last_intent="safety_escalation")
@@ -283,7 +325,7 @@ class AgroMindAgent:
         if image_bytes:
             return "diagnosis"
 
-        if not _client:
+        if not _API_KEY:
             return "general_qa"
 
         try:
@@ -301,19 +343,16 @@ class AgroMindAgent:
                 },
                 {"role": "user", "content": user_text},
             ]
-            # For classification, don't force JSON response format
-            loop = asyncio.get_event_loop()
-
-            def _call():
-                r = _client.chat.completions.create(
-                    model=_MODEL_NAME,
-                    messages=messages,
-                    temperature=0.0,
-                    max_tokens=10,
+            result = (
+                await _qwen_completion(
+                    {
+                        "model": _TEXT_MODEL_NAME,
+                        "messages": messages,
+                        "temperature": 0.0,
+                        "max_tokens": 10,
+                    }
                 )
-                return r.choices[0].message.content.strip().lower()
-
-            result = await loop.run_in_executor(None, _call)
+            ).strip().lower()
 
             for label in ("diagnosis", "logistics", "product_recommendation", "general_qa"):
                 if label in result:
@@ -345,9 +384,9 @@ class AgroMindAgent:
         )
 
         if image_bytes:
-            raw = await _openai_chat_vision(system, user_text or "Analyze this crop image.", image_bytes)
+            raw = await _qwen_chat_vision(system, user_text or "Analyze this crop image.", image_bytes)
         else:
-            raw = await _openai_chat([
+            raw = await _qwen_chat([
                 {"role": "system", "content": system},
                 {"role": "user", "content": user_text},
             ])
@@ -368,7 +407,7 @@ class AgroMindAgent:
                 order_context=order_ctx,
             )
         )
-        raw = await _openai_chat([
+        raw = await _qwen_chat([
             {"role": "system", "content": system},
             {"role": "user", "content": user_text},
         ])
@@ -391,7 +430,7 @@ class AgroMindAgent:
                 matched_products=matched_text,
             )
         )
-        raw = await _openai_chat([
+        raw = await _qwen_chat([
             {"role": "system", "content": system},
             {"role": "user", "content": user_text},
         ])
@@ -415,7 +454,7 @@ class AgroMindAgent:
                 memory_context=memory_ctx or "No prior context.",
             )
         )
-        raw = await _openai_chat([
+        raw = await _qwen_chat([
             {"role": "system", "content": system},
             {"role": "user", "content": user_text},
         ])

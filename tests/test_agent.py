@@ -2,7 +2,7 @@
 tests/test_agent.py
 ───────────────────
 Integration smoke tests for the AgroMindAgent pipeline.
-These tests do NOT call the real Gemini API — they use a mock model
+These tests do NOT call the real Qwen API — they use mocked Qwen helpers
 to test all routing logic without network dependency.
 """
 
@@ -10,23 +10,17 @@ from __future__ import annotations
 
 import asyncio
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
 
+import agent.orchestrator as orchestrator
 from agent.orchestrator import AgroMindAgent, AgentResponse
 from safety.interceptor import SafetyInterceptor
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
-
-def make_mock_gemini_response(data: dict) -> MagicMock:
-    """Create a mock Gemini response object that returns a JSON string."""
-    mock = MagicMock()
-    mock.text = json.dumps(data)
-    return mock
-
 
 MOCK_LOGISTICS_RESPONSE = {
     "intent": "logistics",
@@ -86,14 +80,37 @@ def test_safety_interceptor_safe():
 
 # ── Agent routing tests (mocked LLM) ─────────────────────────────────────────
 
+class FakeCustomerMemory:
+    def __init__(self, session_id: str) -> None:
+        self.session_id = session_id
+        self.turns: list[dict] = []
+        self.updates: list[dict] = []
+
+    def append_turn(self, role: str, text: str) -> None:
+        self.turns.append({"role": role, "text": text})
+
+    def get_context_string(self) -> str:
+        return ""
+
+    def update(self, **kwargs) -> None:
+        self.updates.append(kwargs)
+
+
 @pytest.fixture
-def agent():
-    with patch("agent.orchestrator.genai.GenerativeModel") as MockModel:
-        mock_instance = MagicMock()
-        MockModel.return_value = mock_instance
-        a = AgroMindAgent()
-        a._model = mock_instance
-        return a
+def agent(monkeypatch):
+    a = AgroMindAgent()
+    a._mock_llm_response = MOCK_GENERAL_RESPONSE
+
+    async def fake_qwen_chat(messages, temperature=0.3):
+        return json.dumps(a._mock_llm_response)
+
+    async def fake_qwen_chat_vision(system_prompt, user_text, image_bytes, temperature=0.3):
+        return json.dumps(a._mock_llm_response)
+
+    monkeypatch.setattr(orchestrator, "_qwen_chat", fake_qwen_chat)
+    monkeypatch.setattr(orchestrator, "_qwen_chat_vision", fake_qwen_chat_vision)
+    monkeypatch.setattr(orchestrator, "CustomerMemory", FakeCustomerMemory)
+    return a
 
 
 def run_async(coro):
@@ -116,7 +133,7 @@ def test_safety_escalation_blocks_llm(agent):
 
 def test_logistics_routing(agent):
     """Logistics messages should route to _handle_logistics."""
-    agent._model.generate_content.return_value = make_mock_gemini_response(MOCK_LOGISTICS_RESPONSE)
+    agent._mock_llm_response = MOCK_LOGISTICS_RESPONSE
 
     with patch.object(agent, "_classify_intent", return_value="logistics"):
         result = run_async(agent.run(
@@ -130,7 +147,7 @@ def test_logistics_routing(agent):
 
 def test_product_recommendation_routing(agent):
     """Product queries should route to _handle_product_recommendation."""
-    agent._model.generate_content.return_value = make_mock_gemini_response(MOCK_PRODUCT_RESPONSE)
+    agent._mock_llm_response = MOCK_PRODUCT_RESPONSE
 
     with patch.object(agent, "_classify_intent", return_value="product_recommendation"):
         result = run_async(agent.run(
@@ -144,7 +161,7 @@ def test_product_recommendation_routing(agent):
 
 def test_diagnosis_routing(agent):
     """Diagnosis messages should route to _handle_diagnosis."""
-    agent._model.generate_content.return_value = make_mock_gemini_response(MOCK_DIAGNOSIS_RESPONSE)
+    agent._mock_llm_response = MOCK_DIAGNOSIS_RESPONSE
 
     with patch.object(agent, "_classify_intent", return_value="diagnosis"):
         result = run_async(agent.run(
@@ -157,7 +174,7 @@ def test_diagnosis_routing(agent):
 
 def test_general_qa_routing(agent):
     """General questions should route to _handle_general_qa."""
-    agent._model.generate_content.return_value = make_mock_gemini_response(MOCK_GENERAL_RESPONSE)
+    agent._mock_llm_response = MOCK_GENERAL_RESPONSE
 
     with patch.object(agent, "_classify_intent", return_value="general_qa"):
         result = run_async(agent.run(
@@ -171,7 +188,7 @@ def test_general_qa_routing(agent):
 
 def test_image_forces_diagnosis(agent):
     """Sending image_bytes should force diagnosis routing regardless of intent."""
-    agent._model.generate_content.return_value = make_mock_gemini_response(MOCK_DIAGNOSIS_RESPONSE)
+    agent._mock_llm_response = MOCK_DIAGNOSIS_RESPONSE
 
     with patch.object(agent, "_classify_intent", return_value="logistics"):
         # Even if intent says logistics, image should force diagnosis
@@ -193,7 +210,7 @@ def test_image_forces_diagnosis(agent):
 
 def test_response_has_all_required_fields(agent):
     """AgentResponse.to_dict() must always contain all JSON contract fields."""
-    agent._model.generate_content.return_value = make_mock_gemini_response(MOCK_GENERAL_RESPONSE)
+    agent._mock_llm_response = MOCK_GENERAL_RESPONSE
 
     with patch.object(agent, "_classify_intent", return_value="general_qa"):
         result = run_async(agent.run(

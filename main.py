@@ -49,7 +49,9 @@ def get_agent():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("🌿 Agro-Mind AI starting up …")
-    get_agent()  # Warm up model connection
+    from db.engine import init_db
+    init_db()        # Create tables if they don't exist (idempotent)
+    get_agent()      # Warm up model connection
     yield
     logger.info("🌿 Agro-Mind AI shutting down …")
 
@@ -107,11 +109,13 @@ async def root():
 
 @app.get("/health")
 async def health():
-    api_key_set = bool(os.getenv("GOOGLE_API_KEY", ""))
+    api_key_set = bool(os.getenv("QWEN_API_KEY") or os.getenv("DASHSCOPE_API_KEY"))
     return {
         "status": "ok",
         "api_key_configured": api_key_set,
-        "model": os.getenv("GEMINI_MODEL", "gemini-1.5-flash"),
+        "provider": "qwen",
+        "model": os.getenv("QWEN_MODEL", "qwen-plus"),
+        "vision_model": os.getenv("QWEN_VISION_MODEL", "qwen-vl-plus"),
     }
 
 
