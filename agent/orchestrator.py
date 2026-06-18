@@ -3,9 +3,9 @@ import operator
 import json
 
 from langgraph.graph import StateGraph, END
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
 
+from agent.llm import get_chat_llm
 from agent.tools import (
     classify_intent, 
     analyze_crop_image, 
@@ -95,7 +95,7 @@ def diagnosis_node(state: AgentState):
         analysis = analyze_crop_image.invoke(encoded)
     else:
         # Text-based diagnosis using LLM
-        llm = ChatOpenAI(temperature=0, model="gpt-4o")
+        llm = get_chat_llm(temperature=0)
         profile = get_customer_profile(state["session_id"])
         context_str = f"Context: {json.dumps(profile)}. " if profile else ""
         expert_prompt = f"You are a highly precise agricultural expert. Diagnose this crop issue accurately. Do not guess if unsure. Format your response clearly using plain text without markdown bold asterisks (**). {context_str}Issue: {state['message']}"
@@ -132,7 +132,7 @@ def product_node(state: AgentState):
 from agent.tools import get_customer_profile
 
 def general_node(state: AgentState):
-    llm = ChatOpenAI(temperature=0.3, model="gpt-4o")
+    llm = get_chat_llm(temperature=0.3)
     # Retrieve long term memory
     profile = get_customer_profile(state["session_id"])
     context_str = ""
@@ -176,8 +176,7 @@ def memory_node(state: AgentState):
     # If the agent recommended a treatment, extract it and save it as an active treatment
     if state.get("intent") in ["Diagnosis", "Product"] and "Product ID:" in state.get("response_text", ""):
         try:
-            from langchain_openai import ChatOpenAI
-            llm = ChatOpenAI(temperature=0, model="gpt-4o-mini")
+            llm = get_chat_llm(temperature=0)
             from datetime import datetime
             today = datetime.now().strftime('%Y-%m-%d')
             extract_prompt = f"Extract the recommended treatment details from this text. Format exactly as: 'Start Date: {today} | Crop: [Crop Name] | Disease: [Disease Name] | Product: [Product ID] | Duration: [e.g. 6 days or 2 times per season] | Instructions: [Brief usage instructions]'. If none found, reply 'NONE'. Text: {state.get('response_text')} User Message Context: {state.get('message')}"

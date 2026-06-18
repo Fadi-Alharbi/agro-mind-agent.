@@ -1,8 +1,8 @@
 import os
 from langchain_community.vectorstores import Chroma
-from langchain_openai import OpenAIEmbeddings
 from langchain_core.documents import Document
 from rag.catalog_loader import get_catalog
+from agent.llm import get_embeddings
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -42,8 +42,8 @@ def ingest_catalog():
         }
         documents.append(Document(page_content=content, metadata=metadata))
     
-    print("Initializing OpenAI Embeddings...")
-    embeddings = OpenAIEmbeddings()
+    print("Initializing Qwen (DashScope) Embeddings...")
+    embeddings = get_embeddings()
     
     print(f"Ingesting into ChromaDB at {CHROMA_PATH}...")
     vectorstore = Chroma.from_documents(

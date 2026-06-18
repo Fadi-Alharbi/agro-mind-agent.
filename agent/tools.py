@@ -5,10 +5,10 @@ from typing import Optional, Dict, Any
 
 from langchain_core.tools import tool
 from langchain_community.vectorstores import Chroma
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from sqlalchemy.orm import Session
 import requests
 
+from agent.llm import get_chat_llm, get_vision_llm, get_embeddings
 from db.schema import SessionLocal, Customer, Conversation, Diagnosis
 from safety.interceptor import SafetyInterceptor
 
@@ -17,7 +17,7 @@ DB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))
 CHROMA_PATH = os.path.join(DB_DIR, "chroma_db")
 
 try:
-    embeddings = OpenAIEmbeddings()
+    embeddings = get_embeddings()
     vectorstore = Chroma(persist_directory=CHROMA_PATH, embedding_function=embeddings)
 except Exception as e:
     print(f"Warning: Could not initialize ChromaDB: {e}")
@@ -31,7 +31,7 @@ def classify_intent(message: str) -> str:
     Classifies the user message into one of: 'Diagnosis', 'Product', 'Logistics', 'Safety', or 'General'.
     """
     # Simple deterministic classification, or could use LLM
-    llm = ChatOpenAI(temperature=0, model="gpt-4o-mini")
+    llm = get_chat_llm(temperature=0)
     prompt = f"Classify the following message into EXACTLY ONE category: 'Diagnosis', 'Product', 'Logistics', 'Safety', 'General'. Message: {message}"
     try:
         response = llm.invoke(prompt)
@@ -52,7 +52,7 @@ def analyze_crop_image(image_base64: str) -> str:
     if not image_base64:
         return "No image provided."
         
-    llm = ChatOpenAI(temperature=0, model="gpt-4o")
+    llm = get_vision_llm(temperature=0)
     prompt = "Analyze this crop image. Identify the plant and any disease or pest present. Return the disease name and a confidence score."
     messages = [
         {"role": "user", "content": [
@@ -97,7 +97,7 @@ def recommend_product(diagnosis: str, crop: str) -> str:
     if "No matching products found" in raw_results:
         return raw_results
         
-    llm = ChatOpenAI(temperature=0, model="gpt-4o")
+    llm = get_chat_llm(temperature=0)
     prompt = f"""
     You are an expert agriculturalist. Review the following products from our catalog to see if any can treat the diagnosed issue.
     
