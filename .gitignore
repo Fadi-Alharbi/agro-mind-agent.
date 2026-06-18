@@ -36,3 +36,9 @@ Thumbs.db
 # ── Streamlit ─────────────────────────────────────────────────────────────────
 .streamlit/
 .docs/
+# RAG vector index (generated)
+rag/chroma_store/
+db/chroma_db/
+db/*.db
+*.sqlite
+*.sqlite3

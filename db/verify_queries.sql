@@ -17,7 +17,10 @@ UNION ALL SELECT 'messages',    COUNT(*) FROM messages
 UNION ALL SELECT 'orders',      COUNT(*) FROM orders
 UNION ALL SELECT 'refunds',     COUNT(*) FROM refunds
 UNION ALL SELECT 'escalations', COUNT(*) FROM escalations
-UNION ALL SELECT 'follow_ups',  COUNT(*) FROM follow_ups;
+UNION ALL SELECT 'follow_ups',  COUNT(*) FROM follow_ups
+UNION ALL SELECT 'diagnoses',   COUNT(*) FROM diagnoses
+UNION ALL SELECT 'carts',       COUNT(*) FROM carts
+UNION ALL SELECT 'cart_items',  COUNT(*) FROM cart_items;
 
 -- ── 4) عيّنة من الكتالوج (المتوقع: 114 منتجًا) ─────────────────────
 SELECT id, english_name, product_type, group_price, single_price

@@ -158,6 +158,118 @@ def _extract_json(text: str) -> dict:
     raise ValueError(f"Could not parse JSON from response: {text[:300]}")
 
 
+_CATALOG_CLAIM_PATTERNS = (
+    "لقد اخترنا لك من كتالوجنا",
+    "لقد جلبنا لك",
+    "معروض في الأسفل",
+    "متوفر الآن مع خيار الشراء الجماعي",
+    "الشراء الجماعي",
+    "I have retrieved",
+    "shown below",
+    "Group Purchase",
+    "selected from our catalog",
+)
+
+_NO_SUITABLE_PRODUCT_PATTERNS = (
+    "No suitable product",
+    "none of the matched products",
+    "are unsuitable",
+    "not suitable",
+    "NOT suitable",
+    "no safe",
+    "not labeled",
+    "غير مناسب",
+    "غير آمن",
+    "لا يوجد منتج",
+    "لا أنصح",
+)
+
+_LOGISTICS_KEYWORDS = (
+    "order",
+    "tracking",
+    "track",
+    "shipment",
+    "shipping",
+    "shipped",
+    "delivery",
+    "courier",
+    "refund",
+    "invoice",
+    "طلب",
+    "طلبي",
+    "الشحن",
+    "شحن",
+    "لوجستيات",
+    "تتبع",
+    "التتبع",
+    "رقم التتبع",
+    "رقم اللوجستيات",
+    "مندوب",
+    "توصيل",
+    "وصل",
+    "استرجاع",
+    "استرداد",
+    "فاتورة",
+)
+
+_TRACKING_QUERY_KEYWORDS = (
+    "track",
+    "tracking",
+    "where is my order",
+    "my order",
+    "order status",
+    "shipment",
+    "shipped",
+    "delivery",
+    "طلبي",
+    "تتبع",
+    "التتبع",
+    "رقم التتبع",
+    "رقم اللوجستيات",
+    "الشحن",
+    "تم الشحن",
+    "وين الطلب",
+    "وين طلبي",
+)
+
+
+def _remove_unbacked_catalog_claims(text: str) -> str:
+    """Remove product-selection claims when the model did not return a product ID."""
+    cleaned = text
+    for pattern in _CATALOG_CLAIM_PATTERNS:
+        if pattern in cleaned:
+            sentences = re.split(r"(?<=[.!؟])\s+", cleaned)
+            sentences = [s for s in sentences if pattern not in s]
+            cleaned = " ".join(sentences).strip()
+    return cleaned or text
+
+
+def _attach_recommended_product(response: "AgentResponse") -> None:
+    """Populate carousel products only when the response has a real catalog ID."""
+    response_text_lower = response.response_text.lower()
+    if any(pattern.lower() in response_text_lower for pattern in _NO_SUITABLE_PRODUCT_PATTERNS):
+        response.recommended_product_id = None
+        response.matched_products = []
+        response.group_purchase_triggered = False
+        response.response_text = _remove_unbacked_catalog_claims(response.response_text)
+        return
+
+    if not response.recommended_product_id:
+        response.response_text = _remove_unbacked_catalog_claims(response.response_text)
+        response.group_purchase_triggered = False
+        return
+
+    record = get_product_by_id(response.recommended_product_id)
+    if not record:
+        response.recommended_product_id = None
+        response.group_purchase_triggered = False
+        response.response_text = _remove_unbacked_catalog_claims(response.response_text)
+        return
+
+    response.matched_products = [record.to_dict()]
+    response.group_purchase_triggered = True
+
+
 # ── Qwen call helpers ──────────────────────────────────────────────────────────
 
 def _check_api_key() -> None:
@@ -263,9 +375,16 @@ class AgroMindAgent:
         user_text: str,
         image_bytes: Optional[bytes] = None,
         order_id: Optional[str] = None,
+        external_id: Optional[str] = None,
     ) -> AgentResponse:
-        mem = CustomerMemory(session_id)
-        mem.append_turn("user", user_text)
+        mem = CustomerMemory(session_id, external_id=external_id)
+        image_base64 = base64.b64encode(image_bytes).decode("utf-8") if image_bytes else None
+        mem.append_turn(
+            "user",
+            user_text,
+            has_image=image_bytes is not None,
+            image_base64=image_base64,
+        )
         memory_ctx = mem.get_context_string()
 
         # ── Stage 1: Safety Intercept ─────────────────────────────────────────
@@ -292,7 +411,13 @@ class AgroMindAgent:
             if intent == "diagnosis" or (image_bytes is not None):
                 response = await self._handle_diagnosis(user_text, image_bytes, memory_ctx, session_id)
             elif intent == "logistics":
-                response = await self._handle_logistics(user_text, memory_ctx, order_id, session_id)
+                response = await self._handle_logistics(
+                    user_text,
+                    memory_ctx,
+                    order_id,
+                    session_id,
+                    external_id,
+                )
             elif intent == "product_recommendation":
                 response = await self._handle_product_recommendation(user_text, memory_ctx, session_id)
             else:
@@ -324,6 +449,9 @@ class AgroMindAgent:
     async def _classify_intent(self, user_text: str, image_bytes: Optional[bytes]) -> str:
         if image_bytes:
             return "diagnosis"
+
+        if any(keyword in user_text.lower() for keyword in _LOGISTICS_KEYWORDS):
+            return "logistics"
 
         if not _API_KEY:
             return "general_qa"
@@ -391,14 +519,37 @@ class AgroMindAgent:
                 {"role": "user", "content": user_text},
             ])
 
-        return self._parse_response(raw, "diagnosis", session_id)
+        resp = self._parse_response(raw, "diagnosis", session_id)
+        _attach_recommended_product(resp)
+        return resp
 
     # ── Stage 3b: Logistics ────────────────────────────────────────────────────
 
     async def _handle_logistics(
-        self, user_text: str, memory_ctx: str, order_id: Optional[str], session_id: str
+        self,
+        user_text: str,
+        memory_ctx: str,
+        order_id: Optional[str],
+        session_id: str,
+        external_id: Optional[str],
     ) -> AgentResponse:
-        order_ctx = f"Order ID: {order_id}" if order_id else "No order ID provided."
+        from db.customer_state import get_order_context
+
+        order_ctx = get_order_context(session_id, external_id, order_id)
+        if any(keyword in user_text.lower() for keyword in _TRACKING_QUERY_KEYWORDS) and (
+            order_ctx == "No order ID provided." or "was not found for this logged-in customer" in order_ctx
+        ):
+            return AgentResponse(
+                intent="logistics",
+                safety_risk_detected=False,
+                escalate_human=False,
+                response_text=(
+                    "لا يوجد طلب محفوظ لهذا العميل حالياً، لذلك لا أقدر أؤكد أنه تم الشحن أو أعطي رقم لوجستيات.\n\n"
+                    "للتجربة الصحيحة: أضيفي منتجاً للسلة، ثم اضغطي `Create Order / إنشاء طلب` من السايدبار. "
+                    "بعدها سيظهر الطلب في `Saved orders` ومعه رقم التتبع."
+                ),
+                session_id=session_id,
+            )
         system = (
             SYSTEM_PROMPT + "\n\n" + FEW_SHOT_EXAMPLES + "\n\n"
             + LOGISTICS_PROMPT.format(
@@ -440,6 +591,7 @@ class AgroMindAgent:
             resp.recommended_product_id = matched[0].product_id
         if resp.recommended_product_id:
             resp.group_purchase_triggered = True
+        _attach_recommended_product(resp)
         return resp
 
     # ── Stage 3d: General QA ──────────────────────────────────────────────────

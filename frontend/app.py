@@ -196,6 +196,14 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Session state initialisation ───────────────────────────────────────────────
+# Stable customer identity: stored in the URL query params after login so it
+# survives refresh and links the profile/cart/history across chats.
+if "logged_in" not in st.session_state:
+    existing_uid = st.query_params.get("uid")
+    st.session_state.logged_in = bool(existing_uid)
+    st.session_state.user_id = existing_uid or ""
+if "user_id" not in st.session_state:
+    st.session_state.user_id = st.query_params.get("uid") or ""
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
 if "messages" not in st.session_state:
@@ -204,6 +212,67 @@ if "uploaded_image" not in st.session_state:
     st.session_state.uploaded_image = None
 if "cart" not in st.session_state:
     st.session_state.cart = []
+
+if not st.session_state.logged_in:
+    try:
+        customers_response = requests.get(f"{API_URL}/customers", params={"limit": 50}, timeout=4)
+        customers_response.raise_for_status()
+        existing_customers = customers_response.json().get("customers", [])
+    except Exception:
+        existing_customers = []
+
+    st.markdown("""
+    <div class="agro-header">
+      <h1>🌿 Agro-Mind AI Login</h1>
+      <p>سجل دخولك عشان نحفظ ملفك، محادثاتك، السلة، والمشاكل الزراعية.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    with st.form("demo_login"):
+        customer_options = ["New customer / عميل جديد"] + [
+            (
+                f"{customer.get('username') or customer.get('external_id')} "
+                f"- {customer.get('crop_type') or 'no crop'} "
+                f"({customer.get('message_count', 0)} msgs)"
+            )
+            for customer in existing_customers
+        ]
+        selected_customer = st.selectbox(
+            "Existing customers / العملاء السابقون",
+            customer_options,
+            index=0,
+        )
+        selected_index = customer_options.index(selected_customer)
+        selected_record = existing_customers[selected_index - 1] if selected_index > 0 else None
+        username_default = selected_record.get("external_id") if selected_record else ""
+        username = st.text_input(
+            "Username / اسم المستخدم",
+            value=username_default,
+            placeholder="mayadah",
+        ).strip()
+        password = st.text_input("Password / كلمة المرور", type="password").strip()
+        submitted = st.form_submit_button("Login / دخول", use_container_width=True)
+    if submitted:
+        try:
+            login_response = requests.post(
+                f"{API_URL}/auth/login",
+                json={
+                    "username": username,
+                    "password": password,
+                    "session_id": st.session_state.session_id,
+                },
+                timeout=5,
+            )
+            login_response.raise_for_status()
+            login_data = login_response.json()
+            st.session_state.user_id = login_data["external_id"]
+            st.session_state.logged_in = True
+            st.query_params["uid"] = st.session_state.user_id
+            st.rerun()
+        except requests.exceptions.HTTPError:
+            st.error("Password is 123456 / كلمة المرور 123456")
+        except Exception as exc:
+            st.error(f"Could not login: {exc}")
+    st.stop()
 
 # ── Helper functions ───────────────────────────────────────────────────────────
 def _is_arabic(text: str) -> bool:
@@ -224,6 +293,7 @@ def _intent_badge(intent: str) -> str:
 def _send_message(message: str, image_bytes: Optional[bytes], order_id: Optional[str]) -> dict:
     payload: dict = {
         "session_id": st.session_state.session_id,
+        "external_id": st.session_state.user_id,
         "message": message,
     }
     if image_bytes:
@@ -232,15 +302,30 @@ def _send_message(message: str, image_bytes: Optional[bytes], order_id: Optional
         payload["order_id"] = order_id
 
     try:
-        response = requests.post(f"{API_URL}/chat", json=payload, timeout=30)
+        response = requests.post(f"{API_URL}/chat", json=payload, timeout=75)
         response.raise_for_status()
         return response.json()
+    except requests.exceptions.Timeout:
+        return {
+            "intent": "general_qa",
+            "safety_risk_detected": False,
+            "escalate_human": False,
+            "response_text": (
+                "The assistant is taking longer than expected to respond. "
+                "Please try again in a moment, or check that the model/API connection is healthy."
+            ),
+            "recommended_product_id": None,
+            "group_purchase_triggered": False,
+            "human_summary_brief": None,
+            "matched_products": [],
+            "session_id": st.session_state.session_id,
+        }
     except Exception as exc:
         return {
             "intent": "general_qa",
             "safety_risk_detected": False,
             "escalate_human": False,
-            "response_text": f"Error: {exc}. Ensure FastAPI is live on port 8000.",
+            "response_text": f"Could not reach the chat backend: {exc}",
             "recommended_product_id": None,
             "group_purchase_triggered": False,
             "human_summary_brief": None,
@@ -254,6 +339,159 @@ def _check_backend() -> bool:
         return r.status_code == 200
     except Exception:
         return False
+
+def _load_cart() -> dict:
+    try:
+        response = requests.get(
+            f"{API_URL}/cart",
+            params={
+                "session_id": st.session_state.session_id,
+                "external_id": st.session_state.user_id,
+            },
+            timeout=5,
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception:
+        return {"items": st.session_state.get("cart", []), "total_amount": 0}
+
+def _add_cart_item(product_id: str, diagnosis_id: Optional[int], source: str = "manual") -> dict:
+    response = requests.post(
+        f"{API_URL}/cart/items",
+        json={
+            "session_id": st.session_state.session_id,
+            "external_id": st.session_state.user_id,
+            "product_id": product_id,
+            "quantity": 1,
+            "is_group_buy": True,
+            "diagnosis_id": diagnosis_id,
+            "source": source,
+        },
+        timeout=10,
+    )
+    response.raise_for_status()
+    return response.json()
+
+def _clear_cart() -> dict:
+    response = requests.delete(
+        f"{API_URL}/cart",
+        params={
+            "session_id": st.session_state.session_id,
+            "external_id": st.session_state.user_id,
+        },
+        timeout=10,
+    )
+    response.raise_for_status()
+    return response.json()
+
+def _load_orders() -> list[dict]:
+    try:
+        response = requests.get(
+            f"{API_URL}/orders",
+            params={
+                "session_id": st.session_state.session_id,
+                "external_id": st.session_state.user_id,
+            },
+            timeout=5,
+        )
+        response.raise_for_status()
+        return response.json().get("orders", [])
+    except Exception:
+        return []
+
+def _checkout_cart() -> list[dict]:
+    response = requests.post(
+        f"{API_URL}/orders/checkout",
+        json={
+            "session_id": st.session_state.session_id,
+            "external_id": st.session_state.user_id,
+        },
+        timeout=10,
+    )
+    response.raise_for_status()
+    return response.json().get("orders", [])
+
+def _load_profile() -> dict:
+    try:
+        response = requests.get(
+            f"{API_URL}/profile",
+            params={
+                "session_id": st.session_state.session_id,
+                "external_id": st.session_state.user_id,
+            },
+            timeout=5,
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception:
+        return {"name": "", "location": "", "crop_type": ""}
+
+def _save_profile(name: str, location: str, crop_type: str) -> dict:
+    try:
+        response = requests.put(
+            f"{API_URL}/profile",
+            json={
+                "session_id": st.session_state.session_id,
+                "external_id": st.session_state.user_id,
+                "name": name,
+                "location": location,
+                "crop_type": crop_type,
+            },
+            timeout=4,
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.Timeout as exc:
+        raise RuntimeError("Database request timed out. For the local demo, use SQLite or check the remote DB connection.") from exc
+    except requests.exceptions.RequestException as exc:
+        raise RuntimeError(f"Could not save profile: {exc}") from exc
+
+def _load_chat_history(limit: int = 0) -> list[dict]:
+    try:
+        response = requests.get(
+            f"{API_URL}/chat-history",
+            params={
+                "session_id": st.session_state.session_id,
+                "external_id": st.session_state.user_id,
+                "limit": limit,
+                "include_images": True,
+            },
+            timeout=8,
+        )
+        response.raise_for_status()
+        rows = response.json().get("messages", [])
+        messages: list[dict] = []
+        for row in rows:
+            created_at = row.get("created_at") or ""
+            ts = created_at[11:16] if len(created_at) >= 16 else ""
+            message = {
+                "role": row.get("role", "assistant"),
+                "content": row.get("content", ""),
+                "ts": ts,
+                "has_image": bool(row.get("has_image", False)),
+            }
+            attachments = row.get("attachments") or []
+            if attachments:
+                message["image_base64"] = attachments[0].get("data_base64")
+                message["image_mime_type"] = attachments[0].get("mime_type", "image/jpeg")
+            if row.get("role") == "assistant":
+                message["data"] = {
+                    "intent": row.get("intent") or "general_qa",
+                    "response_text": row.get("content", ""),
+                    "safety_risk_detected": False,
+                    "escalate_human": False,
+                    "matched_products": [],
+                }
+            messages.append(message)
+        return messages
+    except Exception:
+        return []
+
+
+if st.session_state.logged_in and st.session_state.get("history_loaded_for") != st.session_state.user_id:
+    if not st.session_state.messages:
+        st.session_state.messages = _load_chat_history()
+    st.session_state.history_loaded_for = st.session_state.user_id
 
 # ── Sidebar layout ─────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -270,13 +508,61 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
+    profile = _load_profile() if backend_ok else {"name": "", "location": "", "crop_type": ""}
+    with st.expander("👤 My Farm Profile / ملفي", expanded=not bool(profile.get("crop_type"))):
+        with st.form("profile_form"):
+            profile_name = st.text_input("Name / الاسم", value=profile.get("name", ""))
+            profile_location = st.text_input("Location / الموقع", value=profile.get("location", ""))
+            profile_crop = st.text_input("Main crop / المحصول", value=profile.get("crop_type", ""))
+            save_profile = st.form_submit_button("Save Profile / حفظ الملف", use_container_width=True)
+        if save_profile:
+            if backend_ok:
+                try:
+                    _save_profile(profile_name, profile_location, profile_crop)
+                    st.success("Profile saved / تم حفظ الملف")
+                except RuntimeError as exc:
+                    st.error(str(exc))
+            else:
+                st.warning("Backend is offline. Profile was not saved.")
+
+    if st.button("Logout / تسجيل خروج", use_container_width=True):
+        st.session_state.logged_in = False
+        st.session_state.user_id = ""
+        st.session_state.session_id = str(uuid.uuid4())
+        st.session_state.messages = []
+        st.session_state.cart = []
+        st.session_state.history_loaded_for = ""
+        st.query_params.clear()
+        st.rerun()
+
     st.markdown("### 🛒 Your Cart / العربة")
+    cart_snapshot = _load_cart() if backend_ok else {"items": st.session_state.cart, "total_amount": 0}
+    st.session_state.cart = cart_snapshot.get("items", [])
     if st.session_state.cart:
         for idx, item in enumerate(st.session_state.cart):
-            st.markdown(f"**{idx+1}.** `({item['id']})` {item['name']} - ¥{item['price']}")
+            product_id = item.get("product_id") or item.get("id")
+            name = item.get("product_name") or item.get("name") or product_id
+            quantity = item.get("quantity", 1)
+            unit_price = item.get("unit_price") or item.get("price") or 0
+            st.markdown(f"**{idx+1}.** `({product_id})` {name} × {quantity} - ¥{unit_price}")
+        total = cart_snapshot.get("total_amount", 0)
+        if total:
+            st.caption(f"Total / الإجمالي: ¥{total:.0f}")
         if st.button("🔴 Clear Cart", use_container_width=True):
+            if backend_ok:
+                _clear_cart()
             st.session_state.cart = []
             st.rerun()
+        if backend_ok and st.button("Create Order / إنشاء طلب", use_container_width=True):
+            try:
+                created_orders = _checkout_cart()
+                st.session_state.cart = []
+                if created_orders:
+                    st.session_state.order_id = created_orders[0]["id"]
+                    st.toast(f"Order created: {created_orders[0]['id']}", icon="📦")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Could not create order: {exc}")
     else:
         st.caption("Cart is empty / العربة فارغة")
 
@@ -294,14 +580,39 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown("### 📦 Order Tracking")
-    order_id_input = st.text_input("Order ID", placeholder="PDD2026...", key="order_id")
+    saved_orders = _load_orders() if backend_ok else []
+    selected_order_id = ""
+    if saved_orders:
+        order_labels = [
+            (
+                f"{order['id']} - {order.get('status', 'unknown')} - "
+                f"{order.get('tracking_number') or 'no tracking'} - "
+                f"{order.get('product_name') or order.get('product_id')}"
+            )
+            for order in saved_orders
+        ]
+        selected_label = st.selectbox("Saved orders / الطلبات المحفوظة", order_labels)
+        selected_order_id = saved_orders[order_labels.index(selected_label)]["id"]
+        selected_order = saved_orders[order_labels.index(selected_label)]
+        st.caption(
+            f"Status: {selected_order.get('status')} | "
+            f"Tracking: {selected_order.get('tracking_number') or 'not issued'} | "
+            f"Total: ¥{float(selected_order.get('total_amount') or 0):.0f}"
+        )
+    else:
+        st.caption("No saved orders for this customer yet.")
+    manual_order_id = st.text_input("Order ID", placeholder="PDD2026...", key="order_id") or ""
+    order_id_input = manual_order_id.strip() or selected_order_id
 
     if st.button("🔄 New Session", use_container_width=True):
+        # New conversation thread, but the SAME user_id — so the agent still
+        # recognises the returning customer and recalls their profile.
         st.session_state.session_id = str(uuid.uuid4())
         st.session_state.messages = []
         st.session_state.uploaded_image = None
-        st.session_state.cart = []
         st.rerun()
+
+    st.caption(f"👤 Returning ID: `{st.session_state.user_id[:8]}`")
 
 # ── Main Layout ────────────────────────────────────────────────────────────────
 col_main, col_info = st.columns([3, 1])
@@ -326,6 +637,15 @@ with col_main:
             
             if is_user:
                 st.markdown(f'<div class="user-bubble">👤 {msg["content"]}<div class="msg-ts">{ts}</div></div>', unsafe_allow_html=True)
+                if msg.get("image_base64"):
+                    try:
+                        st.image(
+                            BytesIO(base64.b64decode(msg["image_base64"])),
+                            caption="Uploaded image",
+                            use_container_width=True,
+                        )
+                    except Exception:
+                        st.caption("Uploaded image could not be rendered.")
             else:
                 data = msg.get("data", {})
                 resp_text = data.get("response_text", msg["content"])
@@ -393,29 +713,39 @@ with col_main:
                                 
                                 # Standalone action button for absolute transactional support inside the layout
                                 if st.button(labels["btn"], key=f"cart_{st.session_state.session_id}_{pid}_{idx}"):
-                                    st.session_state.cart.append({"id": pid, "name": name, "price": gp})
-                                    st.toast(f"🛒 Added {pid} to your merchant session cart!", icon="🌿")
+                                    try:
+                                        st.session_state.cart = _add_cart_item(
+                                            pid,
+                                            data.get("diagnosis_id"),
+                                            source="recommended" if data.get("diagnosis_id") else "manual",
+                                        ).get("items", [])
+                                        st.toast(f"🛒 Added {pid} to your merchant cart!", icon="🌿")
+                                    except Exception as exc:
+                                        st.session_state.cart.append({"id": pid, "name": name, "price": gp})
+                                        st.toast(f"Cart saved locally only: {exc}", icon="⚠️")
 
     # ── Input Area ─────────────────────────────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
-    default_text = st.session_state.pop("quick_input", "")
+    default_text = str(st.session_state.pop("quick_input", "") or "")
 
     with st.form(key="chat_form", clear_on_submit=True):
-        user_input = st.text_area("Your message", value=default_text, placeholder="Ask in Arabic or English / اسأل بالعربية أو الإنجليزية...", height=90, label_visibility="collapsed", key="user_input")
+        user_input = st.text_area("Your message", value=default_text, placeholder="Ask in Arabic or English / اسأل بالعربية أو الإنجليزية...", height=90, label_visibility="collapsed", key="user_input") or ""
         submit = st.form_submit_button("Send / إرسال ➤", use_container_width=True)
 
-    if submit and user_input.strip():
+    user_text = user_input.strip()
+
+    if submit and user_text:
         ts_now = datetime.now().strftime("%H:%M")
         st.session_state.messages.append({
             "role": "user",
-            "content": user_input.strip(),
+            "content": user_text,
             "ts": ts_now,
             "has_image": st.session_state.uploaded_image is not None,
         })
 
         with st.spinner("🌿 Processing turn..."):
             response_data = _send_message(
-                message=user_input.strip(),
+                message=user_text,
                 image_bytes=st.session_state.uploaded_image,
                 order_id=order_id_input.strip() or None,
             )

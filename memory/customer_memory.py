@@ -19,41 +19,67 @@ Design notes:
 
 from __future__ import annotations
 
+import base64
 from typing import Optional
 
 from sqlalchemy import func, select
 
 from db.engine import SessionLocal
-from db.models import Customer, Message, Session as DBSession
+from db.models import Customer, Message, MessageAttachment, Session as DBSession
 
 
 class CustomerMemory:
     """Per-session memory persisted to the database."""
 
-    def __init__(self, session_id: str) -> None:
+    def __init__(self, session_id: str, external_id: Optional[str] = None) -> None:
         self.session_id = session_id
+        self.external_id = external_id
         self.customer_id: Optional[int] = None
         self._ensure_session()
 
     # ── Setup ──────────────────────────────────────────────────────────────────
 
     def _ensure_session(self) -> None:
-        """Create the Session (and its Customer) row if it doesn't exist yet."""
+        """Attach this session to the right Customer, creating rows as needed.
+
+        Cross-session memory hinges here: when an external_id is supplied we
+        look up the existing Customer and reuse it, so a returning user's
+        profile (crop, location, history) carries across chats. Without an
+        external_id we fall back to an anonymous, per-session Customer.
+        """
         db = SessionLocal()
         try:
             sess = db.get(DBSession, self.session_id)
-            if sess is None:
-                customer = Customer()  # anonymous for now (external_id=None)
+            if sess is not None:
+                self.customer_id = sess.customer_id
+                return
+
+            customer = None
+            if self.external_id:
+                customer = db.scalars(
+                    select(Customer).where(Customer.external_id == self.external_id)
+                ).first()
+            if customer is None:
+                customer = Customer(external_id=self.external_id)
                 db.add(customer)
                 db.flush()  # assign customer.id
-                sess = DBSession(id=self.session_id, customer_id=customer.id)
-                db.add(sess)
-                db.commit()
-                self.customer_id = customer.id
-            else:
-                self.customer_id = sess.customer_id
+
+            sess = DBSession(id=self.session_id, customer_id=customer.id)
+            db.add(sess)
+            db.commit()
+            self.customer_id = customer.id
         finally:
             db.close()
+
+    def _customer_session_ids(self, db) -> list[str]:
+        """All session ids for this customer — the span of cross-chat memory."""
+        if not self.customer_id:
+            return [self.session_id]
+        return list(
+            db.scalars(
+                select(DBSession.id).where(DBSession.customer_id == self.customer_id)
+            ).all()
+        )
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
@@ -103,17 +129,23 @@ class CustomerMemory:
         db = SessionLocal()
         try:
             customer = db.get(Customer, self.customer_id) if self.customer_id else None
+            # Recent issues span ALL of this customer's sessions, so a new chat
+            # recalls diagnoses from previous chats — the "profile across chats".
+            customer_sessions = self._customer_session_ids(db)
             recent_issues = db.scalars(
                 select(Message.content)
-                .where(Message.session_id == self.session_id, Message.intent == "diagnosis")
+                .where(Message.session_id.in_(customer_sessions), Message.intent == "diagnosis")
                 .order_by(Message.id.desc())
                 .limit(3)
             ).all()
             interaction_count = db.scalar(
-                select(func.count(Message.id)).where(Message.session_id == self.session_id)
+                select(func.count(Message.id)).where(Message.session_id.in_(customer_sessions))
             )
+            returning = len(customer_sessions) > 1
 
             parts: list[str] = ["[Customer Profile]"]
+            if returning:
+                parts.append(f"- Returning customer ({len(customer_sessions)} chats)")
             if customer and customer.crop_type:
                 parts.append(f"- Crop: {customer.crop_type}")
             if customer and customer.location:
@@ -123,7 +155,7 @@ class CustomerMemory:
             if recent_issues:
                 parts.append(f"- Recent issues: {'; '.join(i[:120] for i in recent_issues)}")
             if interaction_count:
-                parts.append(f"- Interactions this session: {interaction_count}")
+                parts.append(f"- Total interactions: {interaction_count}")
 
             return "\n".join(parts) if len(parts) > 1 else ""
         finally:
@@ -145,12 +177,39 @@ class CustomerMemory:
         finally:
             db.close()
 
-    def append_turn(self, role: str, text: str) -> None:
+    def append_turn(
+        self,
+        role: str,
+        text: str,
+        *,
+        has_image: bool = False,
+        image_base64: Optional[str] = None,
+        image_mime_type: str = "image/jpeg",
+    ) -> int:
         """Append a conversation turn to the message history."""
         db = SessionLocal()
         try:
-            db.add(Message(session_id=self.session_id, role=role, content=text))
+            message = Message(
+                session_id=self.session_id,
+                role=role,
+                content=text,
+                has_image=has_image or bool(image_base64),
+            )
+            db.add(message)
+            db.flush()
+            if image_base64:
+                try:
+                    size_bytes = len(base64.b64decode(image_base64))
+                except Exception:
+                    size_bytes = len(image_base64)
+                db.add(MessageAttachment(
+                    message_id=message.id,
+                    mime_type=image_mime_type,
+                    data_base64=image_base64,
+                    size_bytes=size_bytes,
+                ))
             db.commit()
+            return message.id
         finally:
             db.close()
 

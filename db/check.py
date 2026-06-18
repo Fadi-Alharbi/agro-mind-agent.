@@ -19,7 +19,10 @@ from sqlalchemy import func, inspect, select, text
 
 from db.engine import SessionLocal, _is_mysql, _safe_url, engine, init_db
 from db.models import (
+    Cart,
+    CartItem,
     Customer,
+    Diagnosis,
     Escalation,
     FollowUp,
     Message,
@@ -32,9 +35,13 @@ from db.models import (
 EXPECTED_TABLES = {
     "customers", "sessions", "messages", "products",
     "orders", "refunds", "escalations", "follow_ups",
+    "diagnoses", "carts", "cart_items",
 }
 
-MODELS = [Customer, Session, Message, Product, Order, Refund, Escalation, FollowUp]
+MODELS = [
+    Customer, Session, Message, Product, Diagnosis, Cart, CartItem,
+    Order, Refund, Escalation, FollowUp,
+]
 
 
 def main() -> None:
@@ -60,7 +67,7 @@ def main() -> None:
     if missing:
         print(f"❌ MISSING tables: {sorted(missing)}")
     else:
-        print("✅ All 8 expected tables present")
+        print(f"✅ All {len(EXPECTED_TABLES)} expected tables present")
 
     # 3. Row counts
     print("\n📊 Row counts:")

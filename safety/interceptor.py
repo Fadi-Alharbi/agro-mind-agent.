@@ -30,6 +30,9 @@ _INTENTIONAL_INGESTION_KEYWORDS: list[str] = [
     "buy it to drink", "drink it to die", "swallow the pesticide",
     "ingest the chemical", "consume the pesticide", "eat the pesticide",
     "drink herbicide", "drink insecticide", "drink fungicide",
+    "drank pesticide", "drank herbicide", "drank insecticide", "drank fungicide",
+    "swallowed pesticide", "swallowed herbicide", "swallowed insecticide",
+    "pesticide and feel dizzy", "after drinking pesticide",
     "ship it to drink", "will it kill if consumed", "will it kill a person",
     "will a person die", "lethal if swallowed", "what happens if drunk",
     "how much to drink to die", "drink enough to",
@@ -52,6 +55,7 @@ _CROP_BURN_COMBO_RISK: list[str] = [
 _REGEX_PATTERNS: list[re.Pattern] = [
     re.compile(r"\bi\s+want\s+to\s+(die|kill|end)\b", re.I),
     re.compile(r"\bdrink\s+(it|this|the\s+\w+)?\s*(pesticide|medicine|chemical|herbicide|insecticide|fungicide)\b", re.I),
+    re.compile(r"\b(drank|swallowed)\s+(a\s+|the\s+)?(pesticide|chemical|poison|herbicide|insecticide|fungicide)\b", re.I),
     re.compile(r"\b(suicide|suicidal)\b", re.I),
     re.compile(r"\b(swallow|ingest|consume|eat)\s+(pesticide|chemical|poison|herbicide)\b", re.I),
     re.compile(r"\blife\s+(has\s+no|is\s+meaningless|is\s+over|doesn.t\s+have)\s+meaning\b", re.I),

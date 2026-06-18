@@ -16,7 +16,7 @@ import logging
 import os
 
 from dotenv import load_dotenv
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
@@ -40,6 +40,11 @@ _is_sqlite = DATABASE_URL.startswith("sqlite")
 _engine_kwargs: dict = {"pool_pre_ping": True, "echo": False}
 if _is_mysql:
     _engine_kwargs.update(pool_recycle=3600, pool_size=5, max_overflow=10)
+    _engine_kwargs.setdefault("connect_args", {}).update({
+        "connect_timeout": 5,
+        "read_timeout": 5,
+        "write_timeout": 5,
+    })
     ssl_mode = _engine_url.query.get("ssl-mode")
     if ssl_mode is not None:
         _engine_url = _engine_url.difference_update_query(["ssl-mode"])
@@ -75,8 +80,40 @@ def init_db() -> None:
     from db import models  # noqa: F401 — ensure models are registered on Base
 
     Base.metadata.create_all(bind=engine)
+    _migrate_existing_schema()
     backend = "MySQL" if _is_mysql else ("SQLite" if _is_sqlite else "DB")
     logger.info("🗄️  %s tables ready (%s)", backend, _safe_url())
+
+
+def _migrate_existing_schema() -> None:
+    """Add columns introduced after the first demo schema was created.
+
+    SQLAlchemy's create_all creates missing tables but intentionally does not
+    alter existing tables. This keeps local SQLite demos and MySQL deployments
+    compatible without bringing in Alembic for the prototype.
+    """
+    inspector = inspect(engine)
+    table_names = set(inspector.get_table_names())
+
+    def has_column(table: str, column: str) -> bool:
+        if table not in table_names:
+            return False
+        return any(col["name"] == column for col in inspector.get_columns(table))
+
+    def add_column(table: str, column: str, ddl_type: str) -> None:
+        if table not in table_names or has_column(table, column):
+            return
+        with engine.begin() as conn:
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}"))
+
+    int_nullable = "INTEGER NULL" if _is_mysql else "INTEGER"
+    add_column("orders", "cart_id", int_nullable)
+    add_column("orders", "diagnosis_id", int_nullable)
+    add_column("orders", "tracking_number", "VARCHAR(128)")
+    add_column("orders", "courier", "VARCHAR(128)")
+    add_column("orders", "shipped_from", "VARCHAR(255)")
+    add_column("orders", "estimated_delivery", "VARCHAR(64)")
+    add_column("follow_ups", "diagnosis_id", int_nullable)
 
 
 def _safe_url() -> str:
