@@ -367,8 +367,13 @@ def _send_message(message: str, image_bytes: Optional[bytes], order_id: Optional
 
 
 def _process_turn(message: str, image_bytes: Optional[bytes], order_id: Optional[str]) -> None:
-    """Run one full chat turn: record the user message, call the backend, and
-    record the assistant reply. Shared by the form submit and the quick buttons."""
+    """Queue a chat turn: record the user message now and mark it pending.
+
+    The backend call is deferred to the pending-turn processor (which runs
+    after the next rerun, below the chat history). This two-phase flow makes
+    the user's bubble appear immediately, with the spinner shown beneath it —
+    instead of the spinner appearing before the message is visible.
+    Shared by the form submit and the quick-question buttons."""
     message = (message or "").strip()
     if not message and not image_bytes:
         return
@@ -378,15 +383,11 @@ def _process_turn(message: str, image_bytes: Optional[bytes], order_id: Optional
         "ts": datetime.now().strftime("%H:%M"),
         "has_image": image_bytes is not None,
     })
-    with st.spinner("🌿 Analyzing your question…"):
-        response_data = _send_message(message=message, image_bytes=image_bytes, order_id=order_id)
-    st.session_state.uploaded_image = None
-    st.session_state.messages.append({
-        "role": "assistant",
-        "content": response_data.get("response_text", ""),
-        "ts": datetime.now().strftime("%H:%M"),
-        "data": response_data,
-    })
+    st.session_state["pending_turn"] = {
+        "message": message,
+        "image_bytes": image_bytes,
+        "order_id": order_id,
+    }
 
 
 def _check_backend() -> bool:
@@ -602,6 +603,26 @@ with col_main:
                                             "data": {"intent": "logistics"}
                                         })
                                         st.rerun()
+
+    # ── Pending-turn processor ─────────────────────────────────────────────────
+    # The user bubble is already rendered above; now call the backend with the
+    # spinner shown beneath it, then store the reply and rerun to display it.
+    if st.session_state.get("pending_turn"):
+        pending = st.session_state.pop("pending_turn")
+        with st.spinner("🌿 Analyzing your question…"):
+            response_data = _send_message(
+                message=pending["message"],
+                image_bytes=pending["image_bytes"],
+                order_id=pending["order_id"],
+            )
+        st.session_state.uploaded_image = None
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": response_data.get("response_text", ""),
+            "ts": datetime.now().strftime("%H:%M"),
+            "data": response_data,
+        })
+        st.rerun()
 
     # ── Input area ─────────────────────────────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
