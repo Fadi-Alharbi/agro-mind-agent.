@@ -330,7 +330,10 @@ def _send_message(message: str, image_bytes: Optional[bytes], order_id: Optional
         payload["order_id"] = order_id
 
     try:
-        response = requests.post(f"{API_URL}/chat", json=payload, timeout=30)
+        # Diagnosis/product turns chain several sequential Qwen calls
+        # (intent → diagnosis → recommend → treatment extraction), so allow
+        # generous headroom over the ~30s a single call can take.
+        response = requests.post(f"{API_URL}/chat", json=payload, timeout=120)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.ConnectionError:
