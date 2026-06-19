@@ -165,6 +165,83 @@ async def chat(request: ChatRequest):
     return ChatResponse(**result.to_dict())
 
 
+# ── Cart & checkout ─────────────────────────────────────────────────────────────
+
+class CartAddRequest(BaseModel):
+    session_id: str
+    product_id: str = Field(..., min_length=1)
+    quantity: int = Field(default=1, ge=1, le=100)
+    is_group_buy: bool = Field(default=True)
+
+
+class SessionRequest(BaseModel):
+    session_id: str
+
+
+@app.get("/cart")
+async def view_cart(session_id: str):
+    """Return the active cart for a session."""
+    from db.customer_state import get_cart
+    try:
+        return get_cart(session_id, None)
+    except Exception as exc:
+        logger.error("get_cart failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/cart/add")
+async def cart_add(request: CartAddRequest):
+    """Add (or increment) a product in the active cart, returning the new cart."""
+    from db.customer_state import add_cart_item, get_cart
+    try:
+        add_cart_item(
+            request.session_id,
+            None,
+            request.product_id,
+            quantity=request.quantity,
+            is_group_buy=request.is_group_buy,
+        )
+        return get_cart(request.session_id, None)
+    except Exception as exc:
+        logger.error("cart_add failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/cart/clear")
+async def cart_clear(request: SessionRequest):
+    """Empty the active cart."""
+    from db.customer_state import clear_cart
+    try:
+        return clear_cart(request.session_id, None)
+    except Exception as exc:
+        logger.error("cart_clear failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/checkout")
+async def checkout(request: SessionRequest):
+    """Convert the active cart into DB-backed orders with tracking numbers."""
+    from db.customer_state import checkout_cart
+    try:
+        return checkout_cart(request.session_id, None)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error("checkout failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/orders")
+async def orders(session_id: str):
+    """List the customer's DB-backed orders (with tracking)."""
+    from db.customer_state import list_orders
+    try:
+        return list_orders(session_id, None)
+    except Exception as exc:
+        logger.error("list_orders failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 # ── Entry point ────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

@@ -390,6 +390,50 @@ def _process_turn(message: str, image_bytes: Optional[bytes], order_id: Optional
     }
 
 
+# ── Cart API helpers ───────────────────────────────────────────────────────────
+def _cart_add(product_id: str, quantity: int, is_group_buy: bool = False) -> dict:
+    """Add a product to the DB-backed cart via the backend."""
+    try:
+        r = requests.post(
+            f"{API_URL}/cart/add",
+            json={
+                "session_id": st.session_state.session_id,
+                "product_id": product_id,
+                "quantity": quantity,
+                "is_group_buy": is_group_buy,
+            },
+            timeout=15,
+        )
+        r.raise_for_status()
+        return r.json()
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+def _get_cart() -> dict:
+    try:
+        r = requests.get(
+            f"{API_URL}/cart", params={"session_id": st.session_state.session_id}, timeout=10
+        )
+        r.raise_for_status()
+        return r.json()
+    except Exception:
+        return {"items": [], "total_amount": 0}
+
+
+def _checkout() -> dict:
+    try:
+        r = requests.post(
+            f"{API_URL}/checkout",
+            json={"session_id": st.session_state.session_id},
+            timeout=20,
+        )
+        r.raise_for_status()
+        return r.json()
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
 def _check_backend() -> bool:
     try:
         r = requests.get(f"{API_URL}/health", timeout=3)
@@ -587,21 +631,39 @@ with col_main:
                                     qty = st.number_input("Qty", min_value=1, max_value=100, value=1, key=f"qty_{ts}_{prod_id}", label_visibility="collapsed")
                                 with col_btn1:
                                     if st.button(f"🛒 Add {qty} to Cart", key=f"btn_{ts}_{prod_id}", use_container_width=True):
-                                        st.session_state.messages.append({
-                                            "role": "assistant",
-                                            "content": f"✅ Successfully added **{qty}x {prod_name}** to your cart! You can view it in your order summary.",
-                                            "ts": datetime.now().strftime("%H:%M"),
-                                            "data": {"intent": "logistics"}
-                                        })
+                                        result = _cart_add(prod_id, qty, is_group_buy=False)
+                                        if result.get("error"):
+                                            st.session_state.messages.append({
+                                                "role": "assistant",
+                                                "content": f"⚠️ Could not add to cart: {result['error']}",
+                                                "ts": datetime.now().strftime("%H:%M"),
+                                                "data": {"intent": "logistics"},
+                                            })
+                                        else:
+                                            st.session_state.messages.append({
+                                                "role": "assistant",
+                                                "content": f"✅ Added **{qty}x {prod_name}** to your cart (total ¥{result.get('total_amount', 0):.2f}). See the 🛒 Cart panel on the right.",
+                                                "ts": datetime.now().strftime("%H:%M"),
+                                                "data": {"intent": "logistics"},
+                                            })
                                         st.rerun()
                                 with col_btn2:
                                     if st.button("👥 Start Group Purchase", key=f"btn_grp_{ts}_{prod_id}", use_container_width=True):
-                                        st.session_state.messages.append({
-                                            "role": "assistant",
-                                            "content": f"🎉 You've started a group purchase for **{prod_name}**! Share the link with friends to get the discounted price.",
-                                            "ts": datetime.now().strftime("%H:%M"),
-                                            "data": {"intent": "logistics"}
-                                        })
+                                        result = _cart_add(prod_id, qty, is_group_buy=True)
+                                        if result.get("error"):
+                                            st.session_state.messages.append({
+                                                "role": "assistant",
+                                                "content": f"⚠️ Could not start group purchase: {result['error']}",
+                                                "ts": datetime.now().strftime("%H:%M"),
+                                                "data": {"intent": "logistics"},
+                                            })
+                                        else:
+                                            st.session_state.messages.append({
+                                                "role": "assistant",
+                                                "content": f"👥 Added **{qty}x {prod_name}** as a group purchase (discounted price). See the 🛒 Cart panel to checkout.",
+                                                "ts": datetime.now().strftime("%H:%M"),
+                                                "data": {"intent": "logistics"},
+                                            })
                                         st.rerun()
 
     # ── Pending-turn processor ─────────────────────────────────────────────────
@@ -659,8 +721,67 @@ with col_main:
         st.rerun()
 
 
-# ── Right column — stats & catalog preview ─────────────────────────────────────
+# ── Right column — cart, stats & catalog preview ───────────────────────────────
 with col_info:
+    # ── Shopping cart ──────────────────────────────────────────────────────────
+    st.markdown("### 🛒 Cart")
+    cart = _get_cart()
+    cart_items = cart.get("items", [])
+    if not cart_items:
+        st.markdown(
+            '<div style="font-size:0.82rem;color:#546e7a;">Your cart is empty. '
+            'Add a recommended product from the chat.</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        for it in cart_items:
+            tag = "👥" if it.get("is_group_buy") else "🛒"
+            st.markdown(
+                f'<div style="font-size:0.8rem;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.05);">'
+                f'{tag} <span style="color:#4db6ac;">{it["product_id"]}</span> '
+                f'<span style="color:#cfd8dc;">×{it["quantity"]}</span> '
+                f'<span style="color:#81c784;float:right;">¥{it.get("line_total", 0):.2f}</span></div>',
+                unsafe_allow_html=True,
+            )
+        st.markdown(
+            f'<div style="font-size:0.95rem;color:#e8f5e9;margin-top:8px;font-weight:600;">'
+            f'Total: ¥{cart.get("total_amount", 0):.2f}</div>',
+            unsafe_allow_html=True,
+        )
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("✅ Checkout", use_container_width=True, key="checkout_btn"):
+                res = _checkout()
+                if res.get("error"):
+                    st.error(f"Checkout failed: {res['error']}")
+                else:
+                    orders = res.get("orders", [])
+                    lines = "\n".join(
+                        f"- Order `{o['id']}` — tracking `{o.get('tracking_number')}` "
+                        f"({o.get('courier')}, {o.get('estimated_delivery')})"
+                        for o in orders
+                    )
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": f"✅ Order placed! {len(orders)} order(s) created:\n\n{lines}\n\n"
+                                   "Ask about your order status anytime (logistics).",
+                        "ts": datetime.now().strftime("%H:%M"),
+                        "data": {"intent": "logistics"},
+                    })
+                    st.rerun()
+        with c2:
+            if st.button("🗑️ Clear", use_container_width=True, key="clear_cart_btn"):
+                try:
+                    requests.post(
+                        f"{API_URL}/cart/clear",
+                        json={"session_id": st.session_state.session_id},
+                        timeout=10,
+                    )
+                except Exception:
+                    pass
+                st.rerun()
+
+    st.markdown("---")
     st.markdown("### 📊 Session Stats")
 
     user_msgs = sum(1 for m in st.session_state.messages if m["role"] == "user")
