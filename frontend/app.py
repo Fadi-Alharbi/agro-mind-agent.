@@ -363,6 +363,29 @@ def _send_message(message: str, image_bytes: Optional[bytes], order_id: Optional
         }
 
 
+def _process_turn(message: str, image_bytes: Optional[bytes], order_id: Optional[str]) -> None:
+    """Run one full chat turn: record the user message, call the backend, and
+    record the assistant reply. Shared by the form submit and the quick buttons."""
+    message = (message or "").strip()
+    if not message and not image_bytes:
+        return
+    st.session_state.messages.append({
+        "role": "user",
+        "content": message,
+        "ts": datetime.now().strftime("%H:%M"),
+        "has_image": image_bytes is not None,
+    })
+    with st.spinner("🌿 Analyzing your question…"):
+        response_data = _send_message(message=message, image_bytes=image_bytes, order_id=order_id)
+    st.session_state.uploaded_image = None
+    st.session_state.messages.append({
+        "role": "assistant",
+        "content": response_data.get("response_text", ""),
+        "ts": datetime.now().strftime("%H:%M"),
+        "data": response_data,
+    })
+
+
 def _check_backend() -> bool:
     try:
         r = requests.get(f"{API_URL}/health", timeout=3)
@@ -416,7 +439,8 @@ with st.sidebar:
     ]
     for qq in quick_questions:
         if st.button(qq, key=f"qq_{hash(qq)}", use_container_width=True):
-            st.session_state["quick_input"] = qq
+            # Send immediately instead of only pre-filling the input box.
+            _process_turn(qq, None, order_id_input.strip() or None)
             st.rerun()
 
     st.markdown("---")
@@ -606,36 +630,8 @@ with col_main:
             submit = st.form_submit_button("Send ➤", use_container_width=True)
 
     if submit and (user_input.strip() or uploaded_file):
-        if uploaded_file:
-            st.session_state.uploaded_image = uploaded_file.read()
-            
-        ts_now = datetime.now().strftime("%H:%M")
-        # Record user turn
-        st.session_state.messages.append({
-            "role": "user",
-            "content": user_input.strip(),
-            "ts": ts_now,
-            "has_image": st.session_state.uploaded_image is not None,
-        })
-
-        with st.spinner("🌿 Analyzing your question…"):
-            response_data = _send_message(
-                message=user_input.strip(),
-                image_bytes=st.session_state.uploaded_image,
-                order_id=order_id_input.strip() or None,
-            )
-
-        # Clear image after sending
-        st.session_state.uploaded_image = None
-
-        # Record agent turn
-        st.session_state.messages.append({
-            "role": "assistant",
-            "content": response_data.get("response_text", ""),
-            "ts": datetime.now().strftime("%H:%M"),
-            "data": response_data,
-        })
-
+        image_bytes = uploaded_file.read() if uploaded_file else st.session_state.uploaded_image
+        _process_turn(user_input.strip(), image_bytes, order_id_input.strip() or None)
         st.rerun()
 
 
