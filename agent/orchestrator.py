@@ -341,29 +341,30 @@ class AgroMindAgent:
         if final_state.get("response_text"):
             mem.append_turn("assistant", final_state.get("response_text", ""))
 
-        # Parse matched products if they were found in text
+        # Attach a product card ONLY for an explicit recommendation.
+        # The recommend_product tool marks a genuine pick with "Product ID: X".
+        # Plain catalog IDs mentioned inside general advice (e.g. dilution
+        # examples like "AF0039 states…") must NOT trigger a product card, and
+        # a "No suitable product found" answer must attach nothing at all.
         text = final_state.get("response_text", "")
         import re
         from rag.catalog_loader import get_product_by_id
-        
+
         products = []
         rec_id = None
-        # Look for typical ID patterns like AF0001, PDD001, etc.
-        match = re.search(r"([A-Z]{2}\d{4,})", text)
-        if match:
-            rec_id = match.group(1)
-            product_record = get_product_by_id(rec_id)
-            if product_record:
-                products.append(product_record.to_dict())
-            else:
-                # Fallback
-                products.append({
-                    "product_id": rec_id,
-                    "product_name": "Recommended Product",
-                    "product_type": "Treatment",
-                    "group_price": 25.0,
-                    "single_price": 35.0
-                })
+        no_product = (
+            "No suitable product found" in text
+            or "We do not have a specific product" in text
+        )
+        if not no_product:
+            match = re.search(r"Product ID:\s*([A-Z]{2,}\d{3,})", text)
+            if match:
+                product_record = get_product_by_id(match.group(1))
+                if product_record:
+                    # Only a real catalog product becomes a recommendation;
+                    # never fabricate a placeholder card.
+                    rec_id = product_record.product_id
+                    products.append(product_record.to_dict())
 
         return AgentResponse(
             intent=final_state.get("intent", "General").lower(),
