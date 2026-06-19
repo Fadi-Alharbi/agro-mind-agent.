@@ -49,6 +49,15 @@ def get_agent():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("🌿 Agro-Mind AI starting up …")
+    # Initialise the relational DB (creates tables incl. treatments) and seed
+    # the product catalog. Both are idempotent and must never block startup.
+    try:
+        from db.engine import init_db
+        from db.seed import seed_products
+        init_db()
+        seed_products()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("DB init/seed skipped (%s).", exc)
     get_agent()  # Warm up model connection
     yield
     logger.info("🌿 Agro-Mind AI shutting down …")

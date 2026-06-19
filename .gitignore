@@ -35,3 +35,8 @@ Thumbs.db
 
 # ── Streamlit ─────────────────────────────────────────────────────────────────
 .streamlit/
+
+# ── Generated data (SQLite DB + Chroma vector indexes) ──────────────────────────
+db/*.db
+db/chroma_db/
+rag/chroma_store/

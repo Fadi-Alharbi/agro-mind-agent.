@@ -5,11 +5,10 @@ from typing import Optional, Dict, Any
 
 from langchain_core.tools import tool
 from langchain_community.vectorstores import Chroma
-from sqlalchemy.orm import Session
-import requests
 
 from agent.llm import get_chat_llm, get_vision_llm, get_embeddings
-from db.schema import SessionLocal, Customer, Conversation, Diagnosis
+from db.customer_state import get_profile
+from memory.customer_memory import CustomerMemory
 from safety.interceptor import SafetyInterceptor
 
 # Initialize global clients/services
@@ -135,16 +134,6 @@ def check_product_safety(product_id: str) -> str:
     return f"Safety constraints for {product_id}:\n{docs[0].page_content}"
 
 @tool
-def lookup_order_status(order_id: str) -> str:
-    """
-    Simulated lookup from a dummy database. Returns the shipping and order status.
-    """
-    if not order_id:
-        return "No order ID provided."
-    # Simulated response
-    return f"Order {order_id} is currently In Transit via Postal service. Expected delivery in 3-5 days."
-
-@tool
 def detect_escalation_risk(message: str) -> bool:
     """
     Checks if a safety/poisoning intent is detected in the message. 
@@ -169,61 +158,40 @@ def create_human_alert() -> str:
 @tool
 def update_customer_profile(session_id: str, data: str) -> str:
     """
-    Commits the session's actions to the SQLite long-term memory.
-    The data should be a JSON string containing keys like 'crop_type', 'location', 'last_intent', etc.
+    Commits the session's actions to the relational long-term memory (db-test schema).
+    The data should be a JSON string with keys like 'crop_type', 'location',
+    'last_intent', 'last_recommended_product'.
     """
     try:
         parsed_data = json.loads(data)
     except json.JSONDecodeError:
         return "Error: data must be a valid JSON string."
-        
-    db: Session = SessionLocal()
+
     try:
-        # Get or create customer
-        customer = db.query(Customer).filter(Customer.id == session_id).first()
-        if not customer:
-            customer = Customer(id=session_id, profile_data="{}")
-            db.add(customer)
-            
-        # Update profile
-        existing_profile = json.loads(customer.profile_data)
-        
-        # Special logic to append active_treatments instead of blindly overwriting
-        if "active_treatments" in parsed_data:
-            treatments = existing_profile.get("active_treatments", [])
-            # append new treatments
-            if isinstance(parsed_data["active_treatments"], list):
-                treatments.extend(parsed_data["active_treatments"])
-            else:
-                treatments.append(parsed_data["active_treatments"])
-            parsed_data["active_treatments"] = treatments
-            
-        existing_profile.update(parsed_data)
-        customer.profile_data = json.dumps(existing_profile)
-        
-        # Also ensure conversation exists
-        conv = db.query(Conversation).filter(Conversation.id == session_id).first()
-        if not conv:
-            conv = Conversation(id=session_id, customer_id=session_id)
-            db.add(conv)
-            
-        db.commit()
+        CustomerMemory(session_id).update(
+            crop_type=parsed_data.get("crop_type"),
+            location=parsed_data.get("location"),
+            last_intent=parsed_data.get("last_intent"),
+            infestation_note=parsed_data.get("infestation_note"),
+            last_product_id=(
+                parsed_data.get("last_recommended_product")
+                or parsed_data.get("last_product_id")
+            ),
+        )
         return "Customer profile updated successfully in long-term memory."
     except Exception as e:
-        db.rollback()
         return f"Database error: {e}"
-    finally:
-        db.close()
 
 def get_customer_profile(session_id: str) -> dict:
-    """Retrieves the customer's long term memory profile from SQLite."""
-    db: Session = SessionLocal()
+    """Retrieve the customer's long-term profile from the relational store.
+
+    Returns the db-test profile dict (name, location, crop_type,
+    last_recommended_product) plus a compact cross-session context string
+    under 'context' for prompt injection.
+    """
     try:
-        customer = db.query(Customer).filter(Customer.id == session_id).first()
-        if customer and customer.profile_data:
-            return json.loads(customer.profile_data)
-        return {}
+        profile = get_profile(session_id, None)
+        profile["context"] = CustomerMemory(session_id).get_context_string()
+        return profile
     except Exception:
         return {}
-    finally:
-        db.close()
