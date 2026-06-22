@@ -1,0 +1,43 @@
+# ── Secrets (NEVER commit) ────────────────────────────────────────────────────
+.env
+*.env
+.env.*
+
+# ── Python cache ──────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# ── Virtual environments ───────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+env
+ENV/
+
+# ── Testing ────────────────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+
+# ── Runtime memory sessions ────────────────────────────────────────────────────
+memory/sessions/
+
+# ── IDE & OS ───────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ── Streamlit ─────────────────────────────────────────────────────────────────
+.streamlit/
+
+# ── Generated data (SQLite DB + Chroma vector indexes) ──────────────────────────
+db/*.db
+db/chroma_db/
+rag/chroma_store/

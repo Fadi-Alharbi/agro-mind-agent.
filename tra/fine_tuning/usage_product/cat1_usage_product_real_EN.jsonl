@@ -1,0 +1,1286 @@
+[
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": ""
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; regarding the ratio, dear customer."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "How do I mix the seeds?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; Mixing ratio and dosage:\n1 gram of bacterial agent mixed with 1 jin (500g) of water, so 30 grams of bacterial agent needs to be mixed with 30 jin of water to make the bacterial solution.\nEach mu requires 10-15 jin of bacterial solution, and the amount of bacterial agent can be adjusted according to the total amount.\n2. Seed mixing operation (two methods):\nSpray method: Put the potato seed pieces into a basin, use a sprayer to evenly spray the bacterial solution on the surface, turning them while spraying, until the potato pieces are 'moist but not dripping'.\nSoaking method: Soak the seed pieces in the bacterial solution for 10-15 minutes, take them out and let them dry in a cool place for 1-2 hours (no standing water on the surface), then sow."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Is this an authentic product?"
+      },
+      {
+        "role": "assistant",
+        "content": "Dear customer, you absolutely don't need to worry about the quality. The cost-performance ratio is also very high!"
+      },
+      {
+        "role": "user",
+        "content": "As long as it's authentic, that's good. I'm worried that after applying it, it won't even kill the weeds."
+      },
+      {
+        "role": "assistant",
+        "content": "The effect is very good, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "How much area can one packet cover?"
+      },
+      {
+        "role": "assistant",
+        "content": "500 grams per mu of land, dear customer; it needs to be mixed with water and sprayed, dear."
+      },
+      {
+        "role": "user",
+        "content": "Can't I just sprinkle it dry like this?"
+      },
+      {
+        "role": "assistant",
+        "content": "Dear customer, it needs to be mixed with water; okay, dear customer."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "What does it mean that this herbicide for broad beans has 4 grams mixed with 1 jin of water? Does it cause harm?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; no harm, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "How much water for one packet?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; Rapeseed-specific herbicide 20ml, one packet mixed with 30 jin of water."
+      },
+      {
+        "role": "user",
+        "content": "It says here it's for broad beans, isn't it sprayed on broad beans?"
+      },
+      {
+        "role": "assistant",
+        "content": "Yes, it can be, dear customer."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Boss, how much water should I mix with one bottle of this medicine?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; 1 gram mixed with 1 jin of water, sprayed on the foliage, used once every 5 days or so. Increase the dosage according to the field size. 500 grams per mu of land. Improvement will appear after 3-4 application cycles."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Boss, how many grams are needed for 2 jin of water?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; 2 grams, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "Okay, thank you boss, wishing you a prosperous business."
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; you're welcome, this is what we should do."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Dear merchant: The goods have been received, but there are no mixing instructions. How do I use it?"
+      },
+      {
+        "role": "assistant",
+        "content": "1 gram mixed with 1 jin of water, sprayed on the foliage, used once every 5 days or so. Increase the dosage according to the field size. 500 grams per mu of land. Improvement will appear after 3-4 application cycles."
+      },
+      {
+        "role": "user",
+        "content": "How many grams is one bottle of this product?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; 50 grams, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "Got it."
+      },
+      {
+        "role": "assistant",
+        "content": "Okay."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Hello, may I ask if this medicine is as effective as advertised?"
+      },
+      {
+        "role": "assistant",
+        "content": "Dear customer, I'm here. Feel free to ask if you have any questions! The effect is very good, dear."
+      },
+      {
+        "role": "user",
+        "content": "Then send me one, I'll try it first."
+      },
+      {
+        "role": "assistant",
+        "content": "Okay, dear~ I will always be here to serve you~"
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "How many jin of water can one bag be mixed with?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; Rapeseed-specific herbicide 20ml, one packet mixed with 30 jin of water."
+      },
+      {
+        "role": "user",
+        "content": "Can this remove weeds from broad beans; the broad beans are a bit large now, can I still spray it?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; yes, you can, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "Will there be any problems? If there are any problems, do you guarantee compensation?"
+      },
+      {
+        "role": "assistant",
+        "content": "There won't be any problems, dear customer. Just use it according to the ratio."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Hello boss; how do I use this?"
+      },
+      {
+        "role": "assistant",
+        "content": "Dear customer, I'm here. Feel free to ask if you have any questions! One gram to one jin of water."
+      },
+      {
+        "role": "user",
+        "content": "Okay, thanks; I water it with this, right? Not spray it?"
+      },
+      {
+        "role": "assistant",
+        "content": "Dear customer, it is mixed with water and sprayed."
+      },
+      {
+        "role": "user",
+        "content": "Mm, okay."
+      },
+      {
+        "role": "assistant",
+        "content": "Okay, dear~ I will always be here to serve you~"
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "If it has no effect, I want a refund. Do I have to spray it again? Am I just throwing money away? Do I have to spray it ten times for it to work?; Nonsense."
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; Dear customer, there are many factors affecting whether a product is effective. We cannot guarantee effectiveness, as it is related to the time of use, environmental conditions, and application operations. You can scan the code to verify if the product is authentic."
+      },
+      {
+        "role": "user",
+        "content": "What time, what conditions? As long as it's sprayed on the ground, it's all the same; if it doesn't work, it doesn't work, and you still talk about subjective reasons; harming consumers is illegal."
+      },
+      {
+        "role": "assistant",
+        "content": "Dear customer, I'm here. Feel free to ask if you have any questions! All products are authentic, dear."
+      },
+      {
+        "role": "user",
+        "content": "***? Didn't you understand? No effect? I mixed two packets in one bucket,"
+      },
+      {
+        "role": "assistant",
+        "content": "If the effect is not good, try increasing the concentration, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "Increase my ass, Pinduoduo is harming people."
+      },
+      {
+        "role": "assistant",
+        "content": "We are truly sorry, dear customer, for bringing you a bad shopping experience. We will improve on this."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "May I ask how much water to mix with one bottle?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; 1 gram mixed with 1 jin of water, sprayed on the foliage, used once every 5 days or so. Increase the dosage according to the field size. 500 grams per mu of land. Improvement will appear after 3-4 application cycles."
+      },
+      {
+        "role": "user",
+        "content": "Is one small bottle 50 grams?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; Yes, dear customer; okay."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "What time can I spray it?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; Dear customer, hello. Our customer service will explain the usage method to you. The normal usage method for water-soluble fertilizers and microbial agents in our store is 1 gram mixed with 1 jin of water. Water-soluble fertilizers are used for root irrigation, and microbial agents can be used for root irrigation or foliar spraying depending on where your crop is sick~ For pesticides, it's 5 grams mixed with 1 jin of water for foliar spraying, dear customer. For daily maintenance, use clean water.\nFor 30g, 1 bottle cap is about 4-7 grams.\nFor 500g, 1 bottle cap is 30 grams (mixed with 30 jin of water).\nFor 200g, 1 bottle cap is about 15 grams.\nIf you need to use it with other pesticides or plant medicines, it is recommended to use them separately.\nIt is best to use it before 10 AM."
+      },
+      {
+        "role": "user",
+        "content": "Why didn't it say how many grams are in one bottle?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; Yours is 50 grams, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "How much water to mix?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; 1 gram mixed with 1 jin of water, sprayed on the foliage, used once every 5 days or so. Increase the dosage according to the field size. 500 grams per mu of land. Improvement will appear after 3-4 application cycles."
+      },
+      {
+        "role": "user",
+        "content": "How much water for one 50-gram bottle; is one bucket of water okay; can I use one bucket of water?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; 50 jin, dear customer."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "How many jin of potato seeds can one packet mix with; why aren't you replying?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; 10 jin, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "Can this product be used on potatoes even though potatoes are not listed in the crop prevention and control?; why aren't you replying?"
+      },
+      {
+        "role": "assistant",
+        "content": "Dear customer, I'm here. Feel free to ask if you have any questions! Yes, you can, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "Potatoes are not in the crop prevention list, you are falsely advertising."
+      },
+      {
+        "role": "assistant",
+        "content": "No, dear customer; you can use it, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "I bought a potato seed dressing agent, but the merchant sent a disease prevention medicine for fruit trees and flowers. Can it be used to dress potato seeds?"
+      },
+      {
+        "role": "assistant",
+        "content": "Yes, you can, dear customer."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "How do I use it?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; 1 gram mixed with 1 jin of water, sprayed on the foliage, used once every 5 days or so. Increase the dosage according to the field size. 500 grams per mu of land. Improvement will appear after 3-4 application cycles."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "May I ask how much water to mix with 1 bottle?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; 1 gram mixed with 1 jin of water, sprayed on the foliage, used once every 5 days or so. Increase the dosage according to the field size. 500 grams per mu of land. Improvement will appear after 3-4 application cycles."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Is this for spraying?"
+      },
+      {
+        "role": "assistant",
+        "content": "Dear customer, I'm here. Feel free to ask if you have any questions! 1 gram mixed with 1 jin of water, sprayed on the foliage, used once every 5 days or so. Increase the dosage according to the field size. 500 grams per mu of land. Improvement will appear after 3-4 application cycles."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "How many jin of water for 50 grams?"
+      },
+      {
+        "role": "assistant",
+        "content": "1 gram mixed with 1 jin of water, sprayed on the foliage, used once every 5 days or so. Increase the dosage according to the field size. 500 grams per mu of land. Improvement will appear after 3-4 application cycles."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Boss, can this medicine be sprayed on rapeseed now?"
+      },
+      {
+        "role": "assistant",
+        "content": "Yes, dear customer; it can be sprayed at temperatures above zero."
+      },
+      {
+        "role": "user",
+        "content": "There's no problem if it gets on broad beans, right?"
+      },
+      {
+        "role": "assistant",
+        "content": "Yes, dear customer; sorry dear customer~ I made a typo, really sorry; it needs to be sprayed on weeds, do not spray it on other things, dear."
+      },
+      {
+        "role": "user",
+        "content": "Spraying on rapeseed weeds, it won't hurt the rapeseed, right?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; it won't."
+      },
+      {
+        "role": "user",
+        "content": "Boss, why haven't the weeds died even after spraying the medicine for over ten days?"
+      },
+      {
+        "role": "assistant",
+        "content": "How much water did you mix it with, dear customer?"
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "I used your medicine, it didn't work, and instead the lettuce died."
+      },
+      {
+        "role": "assistant",
+        "content": "If you use it according to the ratio, this won't happen, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "If it won't happen, why did it die? Fake and inferior product."
+      },
+      {
+        "role": "assistant",
+        "content": "If you use it according to the recommended ratio, the results are very good, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "Good my ass 🔨, fake medicine."
+      },
+      {
+        "role": "assistant",
+        "content": "What was your water mixing ratio, dear customer?"
+      },
+      {
+        "role": "user",
+        "content": "According to your ratio."
+      },
+      {
+        "role": "assistant",
+        "content": "How much water did you mix it with, dear customer; Dear customer, I'm here. Feel free to ask if you have any questions!"
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Can it be sprayed on fruit trees?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; yes, you can, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "Why is the price so low?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; it's a discounted price, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "Oh, is it because the effect is not good?"
+      },
+      {
+        "role": "assistant",
+        "content": "The effect is quite good, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "What is the weight?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello; 500ml, dear customer."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Hello, how many kilograms of water for 50 grams?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; 50 jin, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "Is that single jin or kilograms; okay, thank you."
+      },
+      {
+        "role": "assistant",
+        "content": "You're welcome, this is what we should do."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "How do I use it? Can I water with it?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; 1 gram mixed with 1 jin of water, sprayed on the foliage, used once every 5 days or so. Increase the dosage according to the field size. 500 grams per mu of land. Improvement will appear after 3-4 application cycles."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Is it a liquid or powder? Teach me how to use it before I place an order, I haven't used it before; how to use it."
+      },
+      {
+        "role": "assistant",
+        "content": "It's a liquid agent, dear customer; 1 gram mixed with 1 jin of water, 1 packet of 30 grams mixed with 30 jin of water. 1 packet can mix with 10 jin of seeds."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Can it be used for soil cultivation?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; yes, you can, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "Can it be used for succulents; how to use it for soil cultivation?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; yes, it can; Dear customer, hello. Our customer service will explain the usage method to you. The normal usage method for water-soluble fertilizers and microbial agents in our store is 1 gram mixed with 1 jin of water. Water-soluble fertilizers are used for root irrigation, and microbial agents can be used for root irrigation or foliar spraying depending on where your crop is sick~ For pesticides, it's 5 grams mixed with 1 jin of water for foliar spraying, dear customer. For daily maintenance, use clean water.\nFor 30g, 1 bottle cap is about 4-7 grams.\nFor 500g, 1 bottle cap is 30 grams (mixed with 30 jin of water).\nFor 200g, 1 bottle cap is about 15 grams.\nIf you need to use it with other pesticides or plant medicines, it is recommended to use them separately.\nIt is best to use it before 10 AM."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Please send me the usage instructions."
+      },
+      {
+        "role": "assistant",
+        "content": "1 gram mixed with 1 jin of water, used once every 7-10 days, for 2-3 consecutive times.\nThe core usage logic is 'prevention before low temperatures arrive', rather than remediation after low temperatures occur.\nCritical temperature (not recommended for use below this temperature): -2℃ (minimum night temperature)."
+      },
+      {
+        "role": "user",
+        "content": "Currently, can it not be used below zero?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; how many degrees below zero?"
+      },
+      {
+        "role": "user",
+        "content": "-2 to -4℃."
+      },
+      {
+        "role": "assistant",
+        "content": "-2 degrees is okay, dear customer; Dear customer, I'm here. Feel free to ask if you have any questions!"
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "What is the water mixing ratio?"
+      },
+      {
+        "role": "assistant",
+        "content": "Ethyl poly- (likely a typo for a specific pesticide name like Spinetoram), dear customer, generally the spraying method is used: 10ml mixed with 30 jin of water, 40ml can be used for one mu of land, spray once every 7 days, and apply consecutively 2-3 times."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Dear, how much medicine should be mixed with one bucket of water?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; 1 gram mixed with 1 jin of water, sprayed on the foliage, used once every 5 days or so. Increase the dosage according to the field size. 500 grams per mu of land. Improvement will appear after 3-4 application cycles."
+      },
+      {
+        "role": "user",
+        "content": "For half a bucket of water, 15 jin, should I mix 1.5 grams?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; 15 grams, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "Is it okay to use two caps of this for half a bucket of water?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; weigh it and mix with water."
+      },
+      {
+        "role": "user",
+        "content": "Is this okay?"
+      },
+      {
+        "role": "assistant",
+        "content": "Yes, it is okay, dear customer."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Dear, do I need to take this medicine home and mix it with water myself, or can I spray it directly on the vegetables?"
+      },
+      {
+        "role": "assistant",
+        "content": "Dear customer, mix with water and spray."
+      },
+      {
+        "role": "user",
+        "content": "How many jin of water for one bottle?"
+      },
+      {
+        "role": "assistant",
+        "content": "Dear customer, one gram to one jin of water."
+      },
+      {
+        "role": "user",
+        "content": "Okay, thank you."
+      },
+      {
+        "role": "assistant",
+        "content": "You're welcome, this is what we should do."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Hello boss, why didn't the weeds die?; I used one packet for one bucket of water."
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; you can do a supplementary spray, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "Is your medicine ineffective?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; Dear customer, there are many factors affecting whether a product is effective. We cannot guarantee effectiveness, as it is related to the time of use, environmental conditions, and application operations. You can scan the code to verify if the product is authentic."
+      },
+      {
+        "role": "user",
+        "content": "How many milliliters of medicine should be mixed with one bucket of water?"
+      },
+      {
+        "role": "assistant",
+        "content": "One packet of 24% clethodim mixed with 30 jin of water, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "How long does it take to see effects after spraying? It's been a month for me, and there's still no effect. Is it fake medicine?; You are being so irresponsible."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "How many jin of water for this bottle?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here."
+      },
+      {
+        "role": "user",
+        "content": "How many jin of water for this bottle?"
+      },
+      {
+        "role": "assistant",
+        "content": "1 gram mixed with 1 jin of water, sprayed on the foliage, used once every 5 days or so. Increase the dosage according to the field size. 500 grams per mu of land. Improvement will appear after 3-4 application cycles."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "I sprayed it and there's no effect."
+      },
+      {
+        "role": "assistant",
+        "content": "If you use it according to the ratio, the effect is very good, dear customer."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "This has nothing to do with potatoes; this is a liquid medicine, how do I use it?"
+      },
+      {
+        "role": "assistant",
+        "content": "Dear customer, I'm here. Feel free to ask if you have any questions! 1 gram mixed with 1 jin of water, 1 packet of 30 grams mixed with 30 jin of water. 1 packet can mix with 10 jin of seeds; okay, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "How long should I soak the potatoes directly?"
+      },
+      {
+        "role": "assistant",
+        "content": "5-7 minutes; you're welcome, this is what we should do."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "What is the usage method?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here."
+      },
+      {
+        "role": "user",
+        "content": "I received the goods, but I don't know how to use them."
+      },
+      {
+        "role": "assistant",
+        "content": "1 gram mixed with 1 jin of water, sprayed on the foliage, used once every 5 days or so. Increase the dosage according to the field size. 500 grams per mu of land. Improvement will appear after 3-4 application cycles."
+      },
+      {
+        "role": "user",
+        "content": "How many jin of water can 500 grams be mixed with?; How many jin of water for one bottle cap?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here."
+      },
+      {
+        "role": "user",
+        "content": "How much medicine for 30 jin of water?"
+      },
+      {
+        "role": "assistant",
+        "content": "500 jin, dear customer; Dear customer, I'm here. Feel free to ask if you have any questions!"
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "How is it used?"
+      },
+      {
+        "role": "assistant",
+        "content": "Mixing ratio and dosage:\n1 gram of bacterial agent mixed with 1 jin of water, so 30 grams of bacterial agent needs to be mixed with 30 jin of water to make the bacterial solution.\nEach mu requires 10-15 jin of bacterial solution, and the amount of bacterial agent can be adjusted according to the total amount.\n2. Seed mixing operation (two methods):\nSpray method: Put the potato seed pieces into a basin, use a sprayer to evenly spray the bacterial solution on the surface, turning them while spraying, until the potato pieces are 'moist but not dripping'.\nSoaking method: Soak the seed pieces in the bacterial solution for 10-15 minutes, take them out and let them dry in a cool place for 1-2 hours (no standing water on the surface), then sow."
+      },
+      {
+        "role": "user",
+        "content": "After cutting into pieces, soak them in the bacterial solution for 15 minutes, then take them out and let the water dry, then they can be sown, is that correct?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here."
+      },
+      {
+        "role": "user",
+        "content": "Is this how it's done?"
+      },
+      {
+        "role": "assistant",
+        "content": "Yes, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "After cutting the potato seeds into pieces, soak them in the bacterial solution for 15 minutes, then take them out and let them dry for 1-2 hours. Once the water is dry, they can be sown, is that correct? Dear customer."
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; yes, that's correct, dear customer."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "How much water for one bottle?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; 1 gram mixed with 1 jin of water, sprayed on the foliage, used once every 5 days or so. Increase the dosage according to the field size. 500 grams per mu of land. Improvement will appear after 3-4 application cycles."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "How many jin of water for 500 grams?"
+      },
+      {
+        "role": "assistant",
+        "content": "1 gram mixed with 1 jin of water, sprayed on the foliage, used once every 5 days or so. Increase the dosage according to the field size. 500 grams per mu of land. Improvement will appear after 3-4 application cycles."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "How much water for one 50-gram bottle, and how large an area can it cover?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; 1 gram mixed with 1 jin of water, sprayed on the foliage, used once every 5 days or so. Increase the dosage according to the field size. 500 grams per mu of land. Improvement will appear after 3-4 application cycles."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Hello boss, is this medicine for lettuce? I have dozens of lettuce plants with yellow leaves, can I spray this medicine?"
+      },
+      {
+        "role": "assistant",
+        "content": "Dear customer, I'm here. Feel free to ask if you have any questions! Yes, you can, dear customer (typo in original); sorry dear customer~ I made a typo, really sorry; you can use it, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "Is it mixed with water and sprayed?; If the Chinese cabbage has yellow leaves, can I also spray it?"
+      },
+      {
+        "role": "assistant",
+        "content": "Yes, you can use it, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "How long until it shows effects?"
+      },
+      {
+        "role": "assistant",
+        "content": "It will show effects in 5-7 days, dear customer."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Dear, hello, how do I use this medicine? Is it mixed with water and sprayed?"
+      },
+      {
+        "role": "assistant",
+        "content": "Dear customer, I'm here. Feel free to ask if you have any questions! Dear customer, it's one gram to one jin of water for spraying."
+      },
+      {
+        "role": "user",
+        "content": "Okay, thank you, dear!!"
+      },
+      {
+        "role": "assistant",
+        "content": "You're welcome, this is what we should do."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "How many jin of water can this small bottle be mixed with for spraying?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; 1 gram mixed with 1 jin of water, sprayed on the foliage, used once every 5 days or so. Increase the dosage according to the field size. 500 grams per mu of land. Improvement will appear after 3-4 application cycles."
+      },
+      {
+        "role": "user",
+        "content": "How many grams is one bottle? I can't see the specifications."
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; yours is 50, dear customer."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Dear, how many jin of water can one 500-gram bottle be mixed with?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; 1 gram mixed with 1 jin of water, sprayed on the foliage, used once every 5 days or so. Increase the dosage according to the field size. 500 grams per mu of land. Improvement will appear after 3-4 application cycles."
+      },
+      {
+        "role": "user",
+        "content": "Okay, thank you!"
+      },
+      {
+        "role": "assistant",
+        "content": "You're welcome, this is what we should do."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Does it really work after spraying; I'm afraid it won't work."
+      },
+      {
+        "role": "assistant",
+        "content": "It will show effects in 5-7 days, dear customer; the effect is very good, dear customer."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Can this Junliqing (Fungicide Clear) be used on other leafy crops?; ???"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; yes, you can, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "Can it be used on Chinese cabbage?"
+      },
+      {
+        "role": "assistant",
+        "content": "Yes, it can."
+      },
+      {
+        "role": "user",
+        "content": "Okay, thank you."
+      },
+      {
+        "role": "assistant",
+        "content": "You're welcome, this is what we should do."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Is one bottle for one backpack sprayer of water?"
+      },
+      {
+        "role": "assistant",
+        "content": "1 gram mixed with 1 jin of water, sprayed on the foliage, used once every 5 days or so. Increase the dosage according to the field size. 500 grams per mu of land. Improvement will appear after 3-4 application cycles."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "How much to use?"
+      },
+      {
+        "role": "assistant",
+        "content": "Dear customer, the dilution ratio is 1 gram mixed with 1 jin of water, poured into the hydroponic bottle. Change the water about once every 5 days, and use it 3-4 times. The severely yellowed leaves need to be properly pruned to avoid competing for nutrients. It could also be yellow leaf disease caused by bacteria, which is contagious. Prune the yellowed leaves, use the hydroponic nutrient solution according to the ratio, and then it can be placed in mild sunlight to promote rooting~"
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "How do I use this?"
+      },
+      {
+        "role": "assistant",
+        "content": "Mix with water, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "After mixing with water, do I pour it into the soil?"
+      },
+      {
+        "role": "assistant",
+        "content": "Spray it, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "For example?"
+      },
+      {
+        "role": "assistant",
+        "content": "100 grams mixed with 30 jin of water; then spray."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Can it be used on tea trees?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; it is not recommended."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "How many jin can one packet mix with?"
+      },
+      {
+        "role": "assistant",
+        "content": "Mixing ratio and dosage: 1 gram of bacterial agent mixed with 1 jin of water, so 30 grams of bacterial agent needs to be mixed with 30 jin of water to make the bacterial solution. Each mu requires 10-20 jin of bacterial solution, and the amount of bacterial agent can be adjusted according to the total amount. 2. Seed mixing operation (two methods): Spray method: Put the potato seed pieces into a basin, use a sprayer to evenly spray the bacterial solution on the surface, turning them while spraying, until the potato pieces are 'moist but not dripping'. Soaking method: Soak the seed pieces in the bacterial solution for 10-15 minutes, take them out and let them dry in a cool place for 1-2 hours (no standing water on the surface), then sow."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "How to use?"
+      },
+      {
+        "role": "assistant",
+        "content": "Mixing ratio and dosage: 1 gram of bacterial agent mixed with 1 jin of water, so 30 grams of bacterial agent needs to be mixed with 30 jin of water to make the bacterial solution. Each mu requires 10-20 jin of bacterial solution, and the amount of bacterial agent can be adjusted according to the total amount. 2. Seed mixing operation (two methods): Spray method: Put the potato seed pieces into a basin, use a sprayer to evenly spray the bacterial solution on the surface, turning them while spraying, until the potato pieces are 'moist but not dripping'. Soaking method: Soak the seed pieces in the bacterial solution for 10-15 minutes, take them out and let them dry in a cool place for 1-2 hours (no standing water on the surface), then sow."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "How many bottles are in Connection 1, and how many grams each; how many bottles and how many grams each?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; one bottle is 15 grams."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "How many jin of seeds can 30 grams mix with?"
+      },
+      {
+        "role": "assistant",
+        "content": "Mixing ratio and dosage:\n1 gram of bacterial agent mixed with 1 jin of water, so 30 grams of bacterial agent needs to be mixed with 30 jin of water to make the bacterial solution.\nEach mu requires 10-20 jin of bacterial solution, and the amount of bacterial agent can be adjusted according to the total amount.\n2. Seed mixing operation (two methods):\nSpray method: Put the potato seed pieces into a basin, use a sprayer to evenly spray the bacterial solution on the surface, turning them while spraying, until the potato pieces are 'moist but not dripping'.\nSoaking method: Soak the seed pieces in the bacterial solution for 10-15 minutes, take them out and let them dry in a cool place for 1-2 hours (no standing water on the surface), then sow."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Is it effective? I have white fuzz growing on the leaves of my Kalanchoe (longevity flower)."
+      },
+      {
+        "role": "assistant",
+        "content": "Yes, you can use it, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "Does it need to be mixed with water?; Does it work well?"
+      },
+      {
+        "role": "assistant",
+        "content": "It needs to be mixed with water, dear customer; the effect is very good, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "Hello. My white fuzz problem is not particularly severe. I have been spraying it every day for about a week now. How much longer do I need to spray for it to get better?"
+      },
+      {
+        "role": "assistant",
+        "content": "It will show effects in 7-15 days, dear customer."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Is this a spraying agent?; It's water inside."
+      },
+      {
+        "role": "assistant",
+        "content": "Dear customer, I'm here. Feel free to ask if you have any questions! It's a liquid agent, dear customer; 1 gram mixed with 1 jin of water, sprayed on the foliage, used once every 5 days or so. Increase the dosage according to the field size. 500 grams per mu of land. Improvement will appear after 3-4 application cycles; You're welcome, this is what we should do."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "How many milliliters of medicine for 40 jin of water?"
+      },
+      {
+        "role": "assistant",
+        "content": "24% Bifenazate: 20 grams mixed with 40 jin of water."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Hello, what does 'spray only once' mean? Spray it on the leaves?"
+      },
+      {
+        "role": "assistant",
+        "content": "Dear customer, mix with water and spray on the leaves."
+      },
+      {
+        "role": "user",
+        "content": "Is it for prevention or treatment?"
+      },
+      {
+        "role": "assistant",
+        "content": "It can be for both, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "If there's no problem, why prevent it?"
+      },
+      {
+        "role": "assistant",
+        "content": "Okay, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "Hello, is it really true that spraying only once will keep it away for the whole season?"
+      },
+      {
+        "role": "assistant",
+        "content": "The effect is very good, dear customer."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Can it still be used if it froze?"
+      },
+      {
+        "role": "assistant",
+        "content": "It can be used after it thaws, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "It doesn't work well if it froze."
+      },
+      {
+        "role": "assistant",
+        "content": "Dear customer, it can be used after it thaws; Hello, I'm here; We are truly sorry, dear customer, for bringing you a bad shopping experience. We will improve on this."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Can this only be used on ZZ plants (Money trees)?"
+      },
+      {
+        "role": "assistant",
+        "content": "Yes, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "How do I use this; can it be used on Monstera?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; yes, you can, dear customer; 1 gram mixed with 1 jin of water, sprayed on the foliage, used once every 5 days or so. Increase the dosage according to the field size. 500 grams per mu of land. Improvement will appear after 3-4 application cycles."
+      },
+      {
+        "role": "user",
+        "content": "Can it be used on any green plant?"
+      },
+      {
+        "role": "assistant",
+        "content": "Hello, I'm here; most of them can, dear customer."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Didn't you say this is for potato seed dressing? Why does the instruction say it's not?; Why is it not for potatoes?"
+      },
+      {
+        "role": "assistant",
+        "content": "Dear customer, it is for dressing (typo in original); 1 gram mixed with 1 jin of water, 1 packet of 30 grams mixed with 30 jin of water. 1 packet can mix with 10 jin of seeds."
+      },
+      {
+        "role": "user",
+        "content": "If it's mixed into water, how do I dress the seeds?"
+      },
+      {
+        "role": "assistant",
+        "content": "1 gram mixed with 1 jin of water, dear customer."
+      },
+      {
+        "role": "user",
+        "content": "If mixed with water, do I just put the potatoes in the water?"
+      },
+      {
+        "role": "assistant",
+        "content": "Yes, dear customer."
+      }
+    ]
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Can it be used for weeding in orchards?"
+      },
+      {
+        "role": "assistant",
+        "content": "Dear customer, I'm here. Feel free to ask if you have any questions! It is not recommended, dear customer."
+      }
+    ]
+  }
+]
