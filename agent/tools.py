@@ -1,6 +1,8 @@
 import os
 import json
 import base64
+import threading
+import time
 from typing import Optional, Dict, Any
 
 from langchain_core.tools import tool
@@ -10,6 +12,93 @@ from agent.llm import get_chat_llm, get_vision_llm, get_embeddings
 from db.customer_state import get_profile
 from memory.customer_memory import CustomerMemory
 from safety.interceptor import SafetyInterceptor
+
+# ── Profile cache ──────────────────────────────────────────────────────────────
+# get_customer_profile opens 3 separate remote MySQL connections (~5s total).
+# Caching in memory reduces this to 0ms for every message after the first.
+_PROFILE_TTL = 60.0  # seconds before re-fetching from DB
+_profile_cache: dict[str, tuple[float, dict]] = {}
+_profile_fetching: set[str] = set()
+_profile_lock = threading.Lock()
+
+
+def _get_context_string_no_init(session_id: str) -> str:
+    """Read the customer context string WITHOUT creating the session row.
+
+    CustomerMemory.__init__ calls _ensure_session() which INSERTs a new row if
+    none exists.  When two background threads run concurrently for the same
+    session_id (_bg_user_turn + _fetch_profile_bg), both try to INSERT the same
+    primary key — one waits on the MySQL row-lock for 5+ seconds before failing
+    with a duplicate-key error.  This function avoids _ensure_session() entirely.
+    """
+    from db.engine import SessionLocal
+    from db.models import Customer, Message, Session as DBSession
+    from sqlalchemy import select, func as sa_func
+
+    db = SessionLocal()
+    try:
+        sess = db.get(DBSession, session_id)
+        if sess is None:
+            return ""  # session not yet created; context will be empty
+
+        customer = db.get(Customer, sess.customer_id) if sess.customer_id else None
+
+        # Gather all session IDs for this customer (cross-chat memory)
+        if sess.customer_id:
+            all_session_ids = list(
+                db.scalars(
+                    select(DBSession.id).where(DBSession.customer_id == sess.customer_id)
+                ).all()
+            )
+        else:
+            all_session_ids = [session_id]
+
+        recent_issues = db.scalars(
+            select(Message.content)
+            .where(Message.session_id.in_(all_session_ids), Message.intent == "diagnosis")
+            .order_by(Message.id.desc())
+            .limit(3)
+        ).all()
+        interaction_count = db.scalar(
+            select(sa_func.count(Message.id)).where(Message.session_id.in_(all_session_ids))
+        )
+
+        parts: list[str] = ["[Customer Profile]"]
+        if len(all_session_ids) > 1:
+            parts.append(f"- Returning customer ({len(all_session_ids)} chats)")
+        if customer and customer.crop_type:
+            parts.append(f"- Crop: {customer.crop_type}")
+        if customer and customer.location:
+            parts.append(f"- Location: {customer.location}")
+        if customer and customer.last_recommended_product:
+            parts.append(f"- Last recommended product: {customer.last_recommended_product}")
+        if recent_issues:
+            parts.append(f"- Recent issues: {'; '.join(i[:120] for i in recent_issues)}")
+        if interaction_count:
+            parts.append(f"- Total interactions: {interaction_count}")
+
+        return "\n".join(parts) if len(parts) > 1 else ""
+    finally:
+        db.close()
+
+
+def _fetch_profile_bg(session_id: str) -> None:
+    """Background thread: fetch from DB and populate cache.
+
+    Uses _get_context_string_no_init to avoid racing with _bg_user_turn on
+    MySQL session-row insertion (which previously caused 5+ second lock waits).
+    """
+    try:
+        profile = get_profile(session_id, None)
+        profile["context"] = _get_context_string_no_init(session_id)
+        with _profile_lock:
+            _profile_cache[session_id] = (time.time(), profile)
+    except Exception:
+        with _profile_lock:
+            _profile_cache[session_id] = (time.time(), {})
+    finally:
+        with _profile_lock:
+            _profile_fetching.discard(session_id)
 
 # Initialize global clients/services
 DB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "db")
@@ -220,20 +309,37 @@ def update_customer_profile(session_id: str, data: str) -> str:
                 or parsed_data.get("last_product_id")
             ),
         )
+        invalidate_profile_cache(session_id)
         return "Customer profile updated successfully in long-term memory."
     except Exception as e:
         return f"Database error: {e}"
 
 def get_customer_profile(session_id: str) -> dict:
-    """Retrieve the customer's long-term profile from the relational store.
+    """Return customer profile, served from memory cache (0 ms after first fetch).
 
-    Returns the db-test profile dict (name, location, crop_type,
-    last_recommended_product) plus a compact cross-session context string
-    under 'context' for prompt injection.
+    First call for a session_id returns {} immediately and starts a background
+    DB fetch (~5s). The next message (and all subsequent ones) gets the real
+    profile from cache at 0ms. Cache TTL is 60s; invalidated on profile update.
     """
-    try:
-        profile = get_profile(session_id, None)
-        profile["context"] = CustomerMemory(session_id).get_context_string()
-        return profile
-    except Exception:
-        return {}
+    with _profile_lock:
+        entry = _profile_cache.get(session_id)
+        if entry:
+            ts, profile = entry
+            if time.time() - ts < _PROFILE_TTL:
+                return profile  # Cache hit — 0 ms
+
+        # Cache miss or stale — trigger background fetch, return stale/empty now
+        if session_id not in _profile_fetching:
+            _profile_fetching.add(session_id)
+            threading.Thread(
+                target=_fetch_profile_bg, args=(session_id,), daemon=True
+            ).start()
+
+        return entry[1] if entry else {}
+
+
+def invalidate_profile_cache(session_id: str) -> None:
+    """Expire the cached profile so the next call re-fetches from DB."""
+    with _profile_lock:
+        _profile_cache.pop(session_id, None)
+        _profile_fetching.discard(session_id)

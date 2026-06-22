@@ -23,7 +23,7 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 load_dotenv()
 
-_DEFAULT_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+_DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
 
 def _api_key() -> str:
@@ -37,10 +37,11 @@ def _base_url() -> str:
 def get_chat_llm(temperature: float = 0.0, model: str | None = None) -> ChatOpenAI:
     """A Qwen chat model. `model` overrides the default text model when given."""
     return ChatOpenAI(
-        model=model or os.getenv("QWEN_MODEL", "qwen-plus"),
+        model=model or os.getenv("QWEN_MODEL", "qwen-turbo"),
         base_url=_base_url(),
         api_key=_api_key(),
         temperature=temperature,
+        streaming=True,
     )
 
 
@@ -51,6 +52,7 @@ def get_vision_llm(temperature: float = 0.0) -> ChatOpenAI:
         base_url=_base_url(),
         api_key=_api_key(),
         temperature=temperature,
+        streaming=True,
     )
 
 

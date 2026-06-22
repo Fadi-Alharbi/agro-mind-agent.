@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import uuid
 from datetime import datetime
 from io import BytesIO
@@ -338,7 +339,7 @@ def _render_product_card(product: dict) -> str:
 
 
 def _send_message(message: str, image_bytes: Optional[bytes], order_id: Optional[str]) -> dict:
-    """Call the FastAPI /chat endpoint and return the response dict."""
+    """Call the FastAPI /chat endpoint (non-streaming fallback)."""
     payload: dict = {
         "session_id": st.session_state.session_id,
         "message": message,
@@ -349,40 +350,107 @@ def _send_message(message: str, image_bytes: Optional[bytes], order_id: Optional
         payload["order_id"] = order_id
 
     try:
-        # Diagnosis/product turns chain several sequential Qwen calls
-        # (intent → diagnosis → recommend → treatment extraction), so allow
-        # generous headroom over the ~30s a single call can take.
         response = requests.post(f"{API_URL}/chat", json=payload, timeout=120)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.ConnectionError:
-        return {
-            "intent": "general_qa",
-            "safety_risk_detected": False,
-            "escalate_human": False,
-            "response_text": (
-                "⚠️ Cannot connect to the backend server. "
-                "Please make sure the FastAPI server is running:\n\n"
-                "`uvicorn main:app --reload --port 8000`"
-            ),
-            "recommended_product_id": None,
-            "group_purchase_triggered": False,
-            "human_summary_brief": None,
-            "matched_products": [],
-            "session_id": st.session_state.session_id,
-        }
+        return _connection_error_response()
     except Exception as exc:
-        return {
-            "intent": "general_qa",
-            "safety_risk_detected": False,
-            "escalate_human": False,
-            "response_text": f"An error occurred: {exc}",
-            "recommended_product_id": None,
-            "group_purchase_triggered": False,
-            "human_summary_brief": None,
-            "matched_products": [],
-            "session_id": st.session_state.session_id,
-        }
+        return _error_response(str(exc))
+
+
+def _connection_error_response() -> dict:
+    return {
+        "intent": "general_qa",
+        "safety_risk_detected": False,
+        "escalate_human": False,
+        "response_text": (
+            "⚠️ Cannot connect to the backend server. "
+            "Please make sure the FastAPI server is running:\n\n"
+            "`uvicorn main:app --reload --port 8000`"
+        ),
+        "recommended_product_id": None,
+        "group_purchase_triggered": False,
+        "human_summary_brief": None,
+        "matched_products": [],
+        "session_id": st.session_state.session_id,
+    }
+
+
+def _error_response(msg: str) -> dict:
+    return {
+        "intent": "general_qa",
+        "safety_risk_detected": False,
+        "escalate_human": False,
+        "response_text": f"An error occurred: {msg}",
+        "recommended_product_id": None,
+        "group_purchase_triggered": False,
+        "human_summary_brief": None,
+        "matched_products": [],
+        "session_id": st.session_state.session_id,
+    }
+
+
+def _stream_turn(pending: dict) -> dict:
+    """Call /chat_stream and display tokens live as they arrive.
+
+    Shows each token inside the agent-bubble CSS div as it comes in.
+    Returns the final response_data dict (same shape as /chat response).
+    """
+    payload: dict = {"session_id": st.session_state.session_id, "message": pending["message"]}
+    if pending.get("image_bytes"):
+        payload["image_base64"] = base64.b64encode(pending["image_bytes"]).decode()
+    if pending.get("order_id"):
+        payload["order_id"] = pending["order_id"]
+
+    full_text = ""
+    response_data: dict = {}
+    placeholder = st.empty()
+
+    try:
+        with requests.post(
+            f"{API_URL}/chat_stream",
+            json=payload,
+            stream=True,
+            timeout=120,
+        ) as resp:
+            resp.raise_for_status()
+            for raw_line in resp.iter_lines():
+                if not raw_line:
+                    continue
+                line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
+                try:
+                    event = json.loads(line)
+                except Exception:
+                    continue
+
+                if event.get("type") == "token":
+                    full_text += event["content"]
+                    # Strip [PRODUCT: ID] tags from the live display so they
+                    # never appear to the user — product cards render separately.
+                    display = re.sub(r"\[PRODUCT:.*", "", full_text, flags=re.DOTALL).strip()
+                    placeholder.markdown(
+                        f'<div class="agent-bubble">🤖 {display}▌</div>',
+                        unsafe_allow_html=True,
+                    )
+                elif event.get("type") == "metadata":
+                    response_data = event["data"]
+                elif event.get("type") == "error":
+                    full_text = f"An error occurred: {event.get('content', 'Unknown error')}"
+
+    except requests.exceptions.ConnectionError:
+        response_data = _connection_error_response()
+    except Exception as exc:
+        response_data = _error_response(str(exc))
+
+    placeholder.empty()
+
+    # Use the streamed text if metadata didn't include response_text (fallback).
+    if not response_data.get("response_text") and full_text:
+        display = re.sub(r"\[PRODUCT:.*", "", full_text, flags=re.DOTALL).strip()
+        response_data["response_text"] = display
+
+    return response_data
 
 
 def _process_turn(message: str, image_bytes: Optional[bytes], order_id: Optional[str]) -> None:
@@ -861,168 +929,152 @@ with col_main:
     except Exception:
         pass
 
-    # ── Chat history display ───────────────────────────────────────────────────
-    chat_container = st.container()
-    with chat_container:
-        if not st.session_state.messages:
-            st.markdown("""
-            <div style="text-align:center;padding:40px 20px;opacity:0.6;">
-              <div style="font-size:3rem;">🌾</div>
-              <div style="font-size:1.1rem;color:#80cbc4;margin-top:12px;">
-                Dear customer, I'm here to help!
-              </div>
-              <div style="font-size:0.85rem;color:#546e7a;margin-top:8px;">
-                Ask about crops, pests, products, or your orders.
-              </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        for msg in st.session_state.messages:
-            ts = msg.get("ts", "")
-            if msg["role"] == "user":
-                img_note = " 📷" if msg.get("has_image") else ""
-                st.markdown(
-                    f'<div class="user-bubble">👤 {msg["content"]}{img_note}'
-                    f'<div class="msg-ts">{ts}</div></div>',
-                    unsafe_allow_html=True,
-                )
-            else:
-                data = msg.get("data", {})
-                intent = data.get("intent", "general_qa")
-                badge_html = _intent_badge(intent)
-
-                # Safety escalation banner
-                if data.get("safety_risk_detected"):
-                    st.markdown(f"""
-                    <div class="safety-banner">
-                      <h3>🚨 Safety Alert — Human Support Activated</h3>
-                      <p>{data.get('response_text', '')}</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                else:
-                    escalate_html = ""
-                    if data.get("escalate_human"):
-                        escalate_html = '<div class="escalate-tag">👨‍🌾 Escalated to human agronomist</div>'
-
-                    st.markdown(
-                        f'<div class="agent-bubble">'
-                        f'{badge_html}<br>'
-                        f'🤖 {data.get("response_text", msg["content"])}'
-                        f'{escalate_html}'
-                        f'<div class="msg-ts">{ts}</div>'
-                        f'</div>',
-                        unsafe_allow_html=True,
-                    )
-
-                    # Product cards (Carousel)
-                    products = data.get("matched_products", [])
-                    if products:
-                        idx_key = f"prod_idx_{ts}"
-                        if idx_key not in st.session_state:
-                            st.session_state[idx_key] = 0
-                            
-                        # Ensure bounds
-                        if st.session_state[idx_key] >= len(products):
-                            st.session_state[idx_key] = 0
-                            
-                        current_prod = products[st.session_state[idx_key]]
-                        
-                        st.markdown(_render_product_card(current_prod), unsafe_allow_html=True)
-                        
-                        # Controls wrapper
-                        with st.container():
-                            prod_id = current_prod.get('product_id', str(uuid.uuid4())[:6])
-                            prod_name = current_prod.get('product_name', 'Product')
-                            
-                            st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
-                            col_qty, col_btn1, col_btn2 = st.columns([1, 2, 2])
-                            with col_qty:
-                                qty = st.number_input("Qty", min_value=1, max_value=100, value=1, key=f"qty_{ts}_{prod_id}", label_visibility="collapsed")
-                            with col_btn1:
-                                if st.button(f"🛒 Single ({qty})", key=f"btn_{ts}_{prod_id}", use_container_width=True):
-                                    result = _cart_add(prod_id, qty, is_group_buy=False)
-                                    if result.get("error"):
-                                        st.session_state.messages.append({"role": "assistant", "content": f"⚠️ Error: {result['error']}", "ts": datetime.now().strftime("%H:%M"), "data": {"intent": "logistics"}})
-                                    else:
-                                        st.session_state.messages.append({"role": "assistant", "content": f"✅ Added **{qty}x {prod_name}** to cart. Total: ¥{result.get('total_amount', 0):.2f}.", "ts": datetime.now().strftime("%H:%M"), "data": {"intent": "logistics"}})
-                                    st.rerun()
-                            with col_btn2:
-                                if st.button(f"👥 Group ({qty})", key=f"btn_grp_{ts}_{prod_id}", use_container_width=True):
-                                    result = _cart_add(prod_id, qty, is_group_buy=True)
-                                    if result.get("error"):
-                                        st.session_state.messages.append({"role": "assistant", "content": f"⚠️ Error: {result['error']}", "ts": datetime.now().strftime("%H:%M"), "data": {"intent": "logistics"}})
-                                    else:
-                                        st.session_state.messages.append({"role": "assistant", "content": f"👥 Added **{qty}x {prod_name}** to group purchase. Check cart.", "ts": datetime.now().strftime("%H:%M"), "data": {"intent": "logistics"}})
-                                    st.rerun()
-
-                        # Carousel navigation arrows
-                        if len(products) > 1:
-                            st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
-                            col_prev, col_status, col_next = st.columns([1, 2, 1])
-                            with col_prev:
-                                if st.button("⬅️ Prev", key=f"prev_{ts}", use_container_width=True):
-                                    st.session_state[idx_key] = (st.session_state[idx_key] - 1) % len(products)
-                                    st.rerun()
-                            with col_status:
-                                st.markdown(f"<div style='text-align: center; color: #b0bec5; font-size: 0.9rem; margin-top: 6px;'>Product {st.session_state[idx_key] + 1} of {len(products)}</div>", unsafe_allow_html=True)
-                            with col_next:
-                                if st.button("Next ➡️", key=f"next_{ts}", use_container_width=True):
-                                    st.session_state[idx_key] = (st.session_state[idx_key] + 1) % len(products)
-                                    st.rerun()
-
-    # ── Pending-turn processor ─────────────────────────────────────────────────
-    # The user bubble is already rendered above; now call the backend with the
-    # spinner shown beneath it, then store the reply and rerun to display it.
-    if st.session_state.get("pending_turn"):
-        pending = st.session_state.pop("pending_turn")
-        with st.spinner("🌿 Analyzing your question…"):
-            response_data = _send_message(
-                message=pending["message"],
-                image_bytes=pending["image_bytes"],
-                order_id=pending["order_id"],
-            )
-        st.session_state.uploaded_image = None
-        st.session_state.messages.append({
-            "role": "assistant",
-            "content": response_data.get("response_text", ""),
-            "ts": datetime.now().strftime("%H:%M"),
-            "data": response_data,
-        })
-        st.rerun()
-
-    # ── Input area ─────────────────────────────────────────────────────────────
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # Handle quick-input from sidebar buttons
-    default_text = st.session_state.pop("quick_input", "")
-
-    with st.form(key="chat_form", clear_on_submit=True):
-        user_input = st.text_area(
-            "Your message",
-            value=default_text,
-            placeholder="Ask about your crop disease, order status, product dosage…",
-            height=90,
+    # ── Chat Area Fragment ────────────────────────────────────────────────────────
+    @st.fragment
+    def chat_interface():
+        chat_container = st.container()
+        
+        uploaded_file = st.file_uploader(
+            "Upload Image (Optional)",
+            type=["jpg", "jpeg", "png", "webp"],
             label_visibility="collapsed",
-            key="user_input",
+            key="inline_uploader"
         )
         
-        col_img, col_btn = st.columns([8, 2])
-        with col_img:
-            uploaded_file = st.file_uploader(
-                "Upload Image (Optional)",
-                type=["jpg", "jpeg", "png", "webp"],
-                label_visibility="collapsed",
-                key="inline_uploader"
-            )
-        with col_btn:
-            # Add some vertical spacing to align button with uploader
-            st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
-            submit = st.form_submit_button("Send ➤", use_container_width=True)
+        # 1. Input area
+        prompt = st.chat_input("Ask about your crop disease, order status, product dosage…")
+        
+        # Handle quick-input from sidebar buttons
+        default_text = st.session_state.pop("quick_input", "")
+        if default_text and not prompt:
+            # We can't automatically submit a chat_input, so we use _process_turn directly
+            # Note: This is handled by the sidebar button already, but if needed we can handle it here.
+            pass
 
-    if submit and (user_input.strip() or uploaded_file):
-        image_bytes = uploaded_file.read() if uploaded_file else st.session_state.uploaded_image
-        _process_turn(user_input.strip(), image_bytes, st.session_state.get("order_id", "").strip() or None)
-        st.rerun()
+        if prompt:
+            user_text = prompt
+            image_bytes = uploaded_file.read() if uploaded_file else None
+                
+            _process_turn(user_text, image_bytes, st.session_state.get("order_id", "").strip() or None)
+            
+        # 2. Render messages
+        with chat_container:
+            if not st.session_state.messages:
+                st.markdown("""
+                <div style="text-align:center;padding:40px 20px;opacity:0.6;">
+                  <div style="font-size:3rem;">🌾</div>
+                  <div style="font-size:1.1rem;color:#80cbc4;margin-top:12px;">
+                    Dear customer, I'm here to help!
+                  </div>
+                  <div style="font-size:0.85rem;color:#546e7a;margin-top:8px;">
+                    Ask about crops, pests, products, or your orders.
+                  </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            for msg in st.session_state.messages:
+                ts = msg.get("ts", "")
+                if msg["role"] == "user":
+                    img_note = " 📷" if msg.get("has_image") else ""
+                    st.markdown(
+                        f'<div class="user-bubble">👤 {msg["content"]}{img_note}'
+                        f'<div class="msg-ts">{ts}</div></div>',
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    data = msg.get("data", {})
+                    intent = data.get("intent", "general_qa")
+                    badge_html = _intent_badge(intent)
+
+                    # Safety escalation banner
+                    if data.get("safety_risk_detected"):
+                        st.markdown(f"""
+                        <div class="safety-banner">
+                          <h3>🚨 Safety Alert — Human Support Activated</h3>
+                          <p>{data.get('response_text', '')}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        escalate_html = ""
+                        if data.get("escalate_human"):
+                            escalate_html = '<div class="escalate-tag">👨‍🌾 Escalated to human agronomist</div>'
+
+                        st.markdown(
+                            f'<div class="agent-bubble">'
+                            f'{badge_html}<br>'
+                            f'🤖 {data.get("response_text", msg["content"])}'
+                            f'{escalate_html}'
+                            f'<div class="msg-ts">{ts}</div>'
+                            f'</div>',
+                            unsafe_allow_html=True,
+                        )
+
+                        # Product cards (Carousel)
+                        products = data.get("matched_products", [])
+                        if products:
+                            idx_key = f"prod_idx_{ts}"
+                            if idx_key not in st.session_state:
+                                st.session_state[idx_key] = 0
+                                
+                            if st.session_state[idx_key] >= len(products):
+                                st.session_state[idx_key] = 0
+                                
+                            current_prod = products[st.session_state[idx_key]]
+                            st.markdown(_render_product_card(current_prod), unsafe_allow_html=True)
+                            
+                            with st.container():
+                                prod_id = current_prod.get('product_id', str(uuid.uuid4())[:6])
+                                prod_name = current_prod.get('product_name', 'Product')
+                                
+                                st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
+                                col_qty, col_btn1, col_btn2 = st.columns([1, 2, 2])
+                                with col_qty:
+                                    qty = st.number_input("Qty", min_value=1, max_value=100, value=1, key=f"qty_{ts}_{prod_id}", label_visibility="collapsed")
+                                with col_btn1:
+                                    if st.button(f"🛒 Single ({qty})", key=f"btn_{ts}_{prod_id}", use_container_width=True):
+                                        result = _cart_add(prod_id, qty, is_group_buy=False)
+                                        if result.get("error"):
+                                            st.session_state.messages.append({"role": "assistant", "content": f"⚠️ Error: {result['error']}", "ts": datetime.now().strftime("%H:%M"), "data": {"intent": "logistics"}})
+                                        else:
+                                            st.session_state.messages.append({"role": "assistant", "content": f"✅ Added **{qty}x {prod_name}** to cart. Total: ¥{result.get('total_amount', 0):.2f}.", "ts": datetime.now().strftime("%H:%M"), "data": {"intent": "logistics"}})
+                                        st.rerun() # Full app rerun to update sidebar cart
+                                with col_btn2:
+                                    if st.button(f"👥 Group ({qty})", key=f"btn_grp_{ts}_{prod_id}", use_container_width=True):
+                                        result = _cart_add(prod_id, qty, is_group_buy=True)
+                                        if result.get("error"):
+                                            st.session_state.messages.append({"role": "assistant", "content": f"⚠️ Error: {result['error']}", "ts": datetime.now().strftime("%H:%M"), "data": {"intent": "logistics"}})
+                                        else:
+                                            st.session_state.messages.append({"role": "assistant", "content": f"👥 Added **{qty}x {prod_name}** to group purchase. Check cart.", "ts": datetime.now().strftime("%H:%M"), "data": {"intent": "logistics"}})
+                                        st.rerun()
+
+                            if len(products) > 1:
+                                st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+                                col_prev, col_status, col_next = st.columns([1, 2, 1])
+                                with col_prev:
+                                    if st.button("⬅️ Prev", key=f"prev_{ts}", use_container_width=True):
+                                        st.session_state[idx_key] = (st.session_state[idx_key] - 1) % len(products)
+                                        st.rerun(scope="fragment")
+                                with col_status:
+                                    st.markdown(f"<div style='text-align: center; color: #b0bec5; font-size: 0.9rem; margin-top: 6px;'>Product {st.session_state[idx_key] + 1} of {len(products)}</div>", unsafe_allow_html=True)
+                                with col_next:
+                                    if st.button("Next ➡️", key=f"next_{ts}", use_container_width=True):
+                                        st.session_state[idx_key] = (st.session_state[idx_key] + 1) % len(products)
+                                        st.rerun(scope="fragment")
+
+            # 3. Stream pending turn
+            if st.session_state.get("pending_turn"):
+                pending = st.session_state.pop("pending_turn")
+                response_data = _stream_turn(pending)
+                st.session_state.uploaded_image = None
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": response_data.get("response_text", ""),
+                    "ts": datetime.now().strftime("%H:%M"),
+                    "data": response_data,
+                })
+                st.rerun(scope="fragment")
+
+    chat_interface()
 
 
 # ── Right column — cart, stats & catalog preview ───────────────────────────────
@@ -1120,10 +1172,15 @@ with col_info:
     st.markdown("---")
     st.markdown("### 📋 Quick Catalog")
     try:
-        catalog_resp = requests.get(f"{API_URL}/catalog", timeout=5)
-        if catalog_resp.status_code == 200:
-            catalog_data = catalog_resp.json()
-            products_list = catalog_data.get("products", [])
+        @st.cache_data(ttl=300)
+        def _get_cached_catalog():
+            resp = requests.get(f"{API_URL}/catalog", timeout=5)
+            if resp.status_code == 200:
+                return resp.json().get("products", [])
+            return None
+            
+        products_list = _get_cached_catalog()
+        if products_list is not None:
             st.markdown(
                 f'<div style="font-size:0.8rem;color:#81c784;margin-bottom:8px;">'
                 f'{len(products_list)} products available</div>',
@@ -1141,6 +1198,11 @@ with col_info:
                     f'<div style="font-size:0.75rem;color:#546e7a;margin-top:4px;">+ {len(products_list)-8} more…</div>',
                     unsafe_allow_html=True,
                 )
+        else:
+            st.markdown(
+                '<div style="font-size:0.78rem;color:#546e7a;">Catalog unavailable (backend offline)</div>',
+                unsafe_allow_html=True,
+            )
     except Exception:
         st.markdown(
             '<div style="font-size:0.78rem;color:#546e7a;">Catalog unavailable (backend offline)</div>',

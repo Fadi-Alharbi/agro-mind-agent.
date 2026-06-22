@@ -18,10 +18,13 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Optional
 
+import json as _json
+
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 load_dotenv()
@@ -169,6 +172,41 @@ async def chat(request: ChatRequest):
     return ChatResponse(**result.to_dict())
 
 
+@app.post("/chat_stream")
+async def chat_stream(request: ChatRequest):
+    """Streaming chat endpoint.
+
+    Yields newline-delimited JSON (application/x-ndjson).
+    Each line is one of:
+      {"type": "token",    "content": "<text chunk>"}   — LLM token as it arrives
+      {"type": "metadata", "data":    {<ChatResponse>}}  — final structured result
+      {"type": "error",    "content": "<message>"}       — on failure
+    """
+    agent = get_agent()
+
+    image_bytes: Optional[bytes] = None
+    if request.image_base64:
+        try:
+            image_bytes = base64.b64decode(request.image_base64)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid base64 image data.")
+
+    async def generate():
+        try:
+            async for event in agent.stream(
+                session_id=request.session_id,
+                user_text=request.message,
+                image_bytes=image_bytes,
+                order_id=request.order_id,
+            ):
+                yield _json.dumps(event, ensure_ascii=False) + "\n"
+        except Exception as exc:
+            logger.error("Stream failed: %s", exc, exc_info=True)
+            yield _json.dumps({"type": "error", "content": str(exc)}) + "\n"
+
+    return StreamingResponse(generate(), media_type="application/x-ndjson")
+
+
 # ── Cart & checkout ─────────────────────────────────────────────────────────────
 
 class CartAddRequest(BaseModel):
@@ -243,6 +281,19 @@ async def orders(session_id: str):
         return list_orders(session_id, None)
     except Exception as exc:
         logger.error("list_orders failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/order/{order_id}")
+async def get_single_order(order_id: str, session_id: str):
+    """Get a specific order by ID."""
+    from db.customer_state import get_order
+    try:
+        return get_order(session_id, None, order_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        logger.error("get_order failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=str(exc))
 
 
