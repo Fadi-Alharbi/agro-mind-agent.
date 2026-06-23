@@ -1,74 +1,60 @@
-"""
-agent/orchestrator.py
-─────────────────────
-AgroMindAgent — single-agent, multimodal, 4-stage pipeline.
-Powered by OpenAI gpt-4o (text + vision).
-
-Stage 1 → Safety Intercept  (pre-LLM, keyword/regex)
-Stage 2 → Intent Classification  (OpenAI call)
-Stage 3 → Branch Handler  (diagnosis | logistics | product_rec | general_qa)
-Stage 4 → Memory Write  (async, non-blocking)
-"""
-
-from __future__ import annotations
-
-import asyncio
+from typing import TypedDict, Annotated, Optional
 import base64
+import operator
 import json
-import logging
-import os
 import re
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Optional
+import threading
 
-from dotenv import load_dotenv
+from langgraph.graph import StateGraph, END
+from langchain_core.messages import HumanMessage
 
-load_dotenv()
-
-from openai import OpenAI
-
-from safety.interceptor import SafetyInterceptor
+from agent.llm import get_chat_llm
+from db.customer_state import get_order, get_order_context, get_pesticide_memory
 from memory.customer_memory import CustomerMemory
-from rag.catalog_loader import search_catalog, all_products_summary, get_product_by_id
-from agent.prompts import (
-    SYSTEM_PROMPT,
-    INTENT_PROMPT,
-    LOGISTICS_PROMPT,
-    DIAGNOSIS_TEXT_PROMPT,
-    DIAGNOSIS_VISION_PROMPT,
-    PRODUCT_RECOMMENDATION_PROMPT,
-    GENERAL_QA_PROMPT,
-    FEW_SHOT_EXAMPLES,
-    ALLOWED_CROPS,
+from agent.tools import (
+    classify_intent,
+    analyze_crop_image,
+    recommend_product,
+    retrieve_agronomy_knowledge,
+    detect_escalation_risk,
+    create_human_alert,
+    update_customer_profile
+)
+from agent.web_context import (
+    asks_for_web_context,
+    extract_location_hint,
+    get_weather_context,
+    format_web_context_for_prompt,
 )
 
-logger = logging.getLogger("agro_mind")
+# Backward-compatible alias used by older tests. In production this still
+# returns the Qwen/DashScope-configured LangChain client from agent.llm.
+ChatOpenAI = get_chat_llm
 
-# ── OpenAI configuration ───────────────────────────────────────────────────────
-_API_KEY = os.getenv("OPENAI_API_KEY", "")
-_MODEL_NAME = os.getenv("OPENAI_MODEL", "gpt-4o")
+_ORDER_ID_RE = re.compile(r"\bPDD\d{14}-\d+-\d+\b", re.IGNORECASE)
+_USAGE_TERMS = (
+    "how to use", "how i use", "how do i use", "use it", "use this",
+    "usage", "directions", "instruction", "instructions", "dilution",
+    "dilute", "mix", "mixed", "water ratio", "dosage", "dose",
+    "application rate", "spray rate",
+)
 
-_client = OpenAI(api_key=_API_KEY) if _API_KEY else None
-
-
-# ── Response contract ──────────────────────────────────────────────────────────
-
-@dataclass
+# Return contract expected by backend
 class AgentResponse:
-    intent: str
-    safety_risk_detected: bool
-    escalate_human: bool
-    response_text: str
-    recommended_product_id: Optional[str] = None
-    group_purchase_triggered: bool = False
-    human_summary_brief: Optional[str] = None
-    matched_products: list[dict] = field(default_factory=list)
-    session_id: str = ""
+    def __init__(self, **kwargs):
+        self.intent = kwargs.get("intent", "General")
+        self.safety_risk_detected = kwargs.get("safety_risk_detected", False)
+        self.escalate_human = kwargs.get("escalate_human", False)
+        self.response_text = kwargs.get("response_text", "")
+        self.recommended_product_id = kwargs.get("recommended_product_id")
+        self.group_purchase_triggered = kwargs.get("group_purchase_triggered", False)
+        self.human_summary_brief = kwargs.get("human_summary_brief")
+        self.matched_products = kwargs.get("matched_products", [])
+        self.session_id = kwargs.get("session_id", "")
 
-    def to_dict(self) -> dict:
+    def to_dict(self):
         return {
-            "intent": self.intent,
+            "intent": self.intent.lower() if self.intent else "general_qa",
             "safety_risk_detected": self.safety_risk_detected,
             "escalate_human": self.escalate_human,
             "response_text": self.response_text,
@@ -79,147 +65,599 @@ class AgentResponse:
             "session_id": self.session_id,
         }
 
-
-# ── Canned responses ───────────────────────────────────────────────────────────
-
-def _off_topic_response(session_id: str) -> AgentResponse:
-    return AgentResponse(
-        intent="diagnosis",
-        safety_risk_detected=False,
-        escalate_human=False,
-        response_text=(
-            "Dear customer, I'm here to help! However, I can only analyze crops "
-            "in our supported catalog (Citrus, Rice, Tomatoes, Onions, Ginger, Garlic, "
-            "Cruciferous Vegetables, Strawberries, Peppers, Cucumbers, and more). "
-            "Please send a clear photo of your crop and I'll be happy to assist!"
-        ),
-        session_id=session_id,
-    )
+class AgentState(TypedDict):
+    session_id: str
+    message: str
+    image_bytes: Optional[bytes]
+    order_id: Optional[str]
+    
+    intent: str
+    safety_risk_detected: bool
+    escalate_human: bool
+    response_text: str
+    recommended_product_id: Optional[str]
+    group_purchase_triggered: bool
+    human_summary_brief: Optional[str]
+    matched_products: list
 
 
-def _zero_guess_response(session_id: str) -> AgentResponse:
-    return AgentResponse(
-        intent="diagnosis",
-        safety_risk_detected=False,
-        escalate_human=True,
-        response_text=(
-            "We do not have a verified matching product or diagnosis for this specific "
-            "crop context. Escalating to a human expert."
-        ),
-        human_summary_brief="Low-confidence diagnosis or no matching product found. Agronomist review required.",
-        session_id=session_id,
-    )
+class _NoopMemory:
+    """Fallback when the persistence layer is unavailable."""
+
+    def append_turn(self, *args, **kwargs) -> int:
+        return 0
+
+    def chat_history(self) -> list[dict]:
+        return []
 
 
-def _safety_response(safety_result, session_id: str) -> AgentResponse:
-    return AgentResponse(
-        intent="safety_escalation",
-        safety_risk_detected=True,
-        escalate_human=True,
-        response_text=(
-            "Dear customer, your safety and life are of utmost importance. "
-            "Automated support has been stopped to protect your health. "
-            "A human expert has been alerted to assist you immediately. "
-            "Please know that you are not alone — help is on the way. "
-            "If you are in immediate danger, please call your local emergency services."
-        ),
-        human_summary_brief=safety_result.human_summary_brief,
-        session_id=session_id,
-    )
-
-
-# ── JSON extraction helper ─────────────────────────────────────────────────────
-
-def _extract_json(text: str) -> dict:
-    """Extract a JSON object from an OpenAI response that may include markdown fences."""
+def _session_memory(session_id: str):
     try:
-        return json.loads(text.strip())
-    except json.JSONDecodeError:
+        return CustomerMemory(session_id)
+    except Exception:
+        return _NoopMemory()
+
+
+def _recent_chat_history(session_id: str, current_message: str, limit: int = 6) -> list[dict]:
+    """Read recent turns, excluding the current user message when already saved."""
+    try:
+        history = _session_memory(session_id).chat_history()
+    except Exception:
+        return []
+
+    if history and history[-1].get("role") == "user" and history[-1].get("text") == current_message:
+        history = history[:-1]
+    return history[-limit:]
+
+
+def _contextualize_short_sales_reply(session_id: str, message: str) -> Optional[str]:
+    """Expand short farmer replies using the immediately preceding chat context."""
+    stripped = (message or "").strip()
+    if not stripped:
+        return None
+
+    short_weed_replies = {
+        "متسلقة", "متسلقه", "متسلق", "متسلقات",
+        "ورقية", "عريضة", "عريضه", "عشبية", "عشبيه",
+        "حشائش", "حشايش", "اعشاب", "أعشاب",
+    }
+    if stripped not in short_weed_replies and len(stripped.split()) > 3:
+        return None
+
+    history_text = " ".join(
+        turn.get("text", "") for turn in _recent_chat_history(session_id, stripped)
+    ).lower()
+    weed_context = any(term in history_text for term in (
+        "حشائش", "حشايش", "اعشاب", "أعشاب", "weed", "weeds", "herbicide",
+    ))
+    orchard_context = any(term in history_text for term in (
+        "حمضيات", "بستان", "ليمون", "برتقال", "citrus", "orchard", "fruit tree",
+    ))
+
+    if stripped in short_weed_replies and weed_context:
+        crop_context = "citrus orchard" if orchard_context else "the crop mentioned earlier"
+        return (
+            "The farmer is answering a previous clarification question about weed type. "
+            f"Context: {crop_context}. Weed type: {stripped}. "
+            "Recommend a suitable catalog product now; do not require a structured prompt."
+        )
+
+    return None
+
+
+async def _llm_content(llm, prompt: str) -> str:
+    """Call async LLMs when available, with sync fallback for test doubles."""
+    try:
+        result = llm.ainvoke(prompt)
+        if hasattr(result, "__await__"):
+            return (await result).content
+    except TypeError:
+        pass
+    return llm.invoke(prompt).content
+
+
+def _extract_order_id(message: str) -> Optional[str]:
+    match = _ORDER_ID_RE.search(message or "")
+    return match.group(0) if match else None
+
+
+def _is_usage_question(message: str) -> bool:
+    normalized = (message or "").casefold()
+    return any(term in normalized for term in _USAGE_TERMS)
+
+
+def _find_catalog_product_in_text(message: str):
+    from rag.catalog_loader import get_catalog, get_product_by_id
+
+    raw = message or ""
+    normalized = raw.casefold()
+
+    for token in re.findall(r"\b[A-Z]{2}\d{4}\b", raw, flags=re.IGNORECASE):
+        product = get_product_by_id(token)
+        if product:
+            return product
+
+    products = sorted(
+        get_catalog(),
+        key=lambda rec: max(len(rec.product_name or ""), len(rec.english_name or "")),
+        reverse=True,
+    )
+    for product in products:
+        for name in (product.product_name, product.english_name):
+            if name and len(name) >= 4 and name.casefold() in normalized:
+                return product
+
+    return None
+
+
+def _resolve_usage_product(state: AgentState):
+    from rag.catalog_loader import get_product_by_id
+
+    order_id = state.get("order_id") or _extract_order_id(state.get("message", ""))
+    if order_id:
+        try:
+            order = get_order(state["session_id"], None, order_id)
+        except ValueError:
+            return None, f"Order {order_id} was not found for this customer."
+
+        product_id = order.get("product_id")
+        product = get_product_by_id(product_id) if product_id else None
+        if product:
+            return product, None
+        return None, f"Order {order_id} does not have a catalog product attached."
+
+    product = _find_catalog_product_in_text(state.get("message", ""))
+    if product:
+        return product, None
+
+    try:
+        memory = get_pesticide_memory(state["session_id"], None)
+    except Exception:
+        memory = {}
+    remembered = memory.get("current") if isinstance(memory, dict) else None
+    remembered_product_id = remembered.get("product_id") if remembered else None
+    if remembered_product_id:
+        product = get_product_by_id(remembered_product_id)
+        if product:
+            return product, None
+
+    return None, None
+
+
+def _format_product_usage(product) -> str:
+    name = product.english_name or product.product_name
+    lines = [
+        f"Usage for {name} ({product.product_id}):",
+    ]
+
+    if product.main_ingredients:
+        lines.append(f"Active ingredient: {product.main_ingredients}")
+    if product.water_ratio:
+        lines.append(f"Dilution: {product.water_ratio}.")
+
+    how_to = product.how_to_use or ""
+    if "Dilute 1000-1500 times" in how_to:
+        lines.append("For citrus spider mites: dilute 1000-1500 times and spray.")
+    elif how_to:
+        first_instruction = next(
+            (line.strip() for line in how_to.splitlines() if line.strip() and not line.startswith("|")),
+            "",
+        )
+        if first_instruction:
+            lines.append(f"Label direction: {first_instruction}")
+
+    if "underside of the leaves" in how_to:
+        lines.append("Spray evenly and thoroughly, especially the underside of leaves.")
+    if "windy days" in how_to or "rain is expected" in how_to:
+        lines.append("Do not spray on windy days or when rain is expected within 1 hour.")
+    if "safe interval" in how_to and "21 days" in how_to:
+        lines.append("For citrus, keep a 21-day pre-harvest safety interval.")
+    if "maximum number of uses per season is once" in how_to:
+        lines.append("Do not use more than once per season on citrus.")
+
+    lines.append(
+        "Wear protective gloves/clothing, avoid high heat, and follow the physical product label if it differs from this catalog record."
+    )
+    return "\n".join(lines)
+
+
+_UNKNOWN_USAGE_PRODUCT_MESSAGE = (
+    "Which product are you asking about? Please send the product name, catalog code, "
+    "order ID, or select the product first so I can give the exact mixing ratio. "
+    "Do not guess dilution rates across medicines."
+)
+
+
+# --- Graph Nodes ---
+
+def safety_check_node(state: AgentState):
+    """Stage 1: Check for safety risks"""
+    msg = state["message"]
+    risk = detect_escalation_risk.invoke(msg)
+    if risk:
+        alert_text = create_human_alert.invoke({
+            "session_id": state["session_id"],
+            "message": msg,
+            "risk_category": "safety",
+        })
+        return {
+            "safety_risk_detected": True,
+            "escalate_human": True,
+            "intent": "Safety",
+            "response_text": alert_text,
+            "human_summary_brief": "Automated safety override triggered."
+        }
+    return {"safety_risk_detected": False}
+
+def intent_node(state: AgentState):
+    """Stage 2: Classify intent if no safety risk"""
+    if state.get("image_bytes"):
+        return {"intent": "Diagnosis"}
+    
+    if state["message"] == "INIT_SESSION":
+        return {"intent": "General"}
+
+    contextual_message = _contextualize_short_sales_reply(
+        state["session_id"], state["message"]
+    )
+    if contextual_message:
+        return {"intent": "Product", "message": contextual_message}
+
+    intent = classify_intent.invoke(state["message"])
+    return {"intent": intent}
+
+async def diagnosis_node(state: AgentState):
+    """Handle image and crop diagnosis.
+
+    Image path : vision LLM → product recommendation (2 sync calls via tools).
+    Text path  : ChromaDB retrieval (no LLM) → single async LLM call; tokens
+                 stream to the client via astream stream_mode='messages'.
+    """
+    img = state.get("image_bytes")
+    if img:
+        # Vision path — sync tools, tokens don't stream (acceptable).
+        encoded = base64.b64encode(img).decode("utf-8") if isinstance(img, bytes) else img
+        analysis = analyze_crop_image.invoke(encoded)
+        recommendation = recommend_product.invoke({"diagnosis": analysis, "crop": state["message"]})
+        if "No suitable product found" in recommendation:
+            final_text = (
+                f"Diagnosis:\n{analysis}\n\n"
+                f"Notice: We do not have a specific product in our catalog for this, "
+                f"but here is some expert advice:\n\n"
+                f"{recommendation.replace('No suitable product found in our catalog for this specific issue.', '')}"
+            )
+        else:
+            final_text = f"Diagnosis:\n{analysis}\n\nRecommended Solution & Usage:\n{recommendation}"
+        return {"response_text": final_text}
+
+    # Text path — async LLM call so tokens stream to the client.
+    llm = get_chat_llm(temperature=0)
+    profile = get_customer_profile(state["session_id"])
+    context_str = f"Customer context: {json.dumps(profile)}.\n" if profile else ""
+
+    # Fast ChromaDB retrieval — no LLM involved.
+    catalog_context = retrieve_agronomy_knowledge.invoke(state["message"])
+
+    combined_prompt = (
+        "You are an agricultural AI support agent.\n"
+        "Task: diagnose the crop issue AND recommend a product from the catalog.\n\n"
+        "Rules:\n"
+        "- Keep your answer under 150 words.\n"
+        "- Plain text only — no markdown bold (**).\n"
+        "- Do NOT write product name, price, or ingredients in your text.\n"
+        "- CRITICAL RULE: If you find a matching product in the catalog, YOU MUST literally write the exact string [PRODUCT: AFXXXX] (e.g., [PRODUCT: AF0058]) at the very end of your answer.\n"
+        "- If no catalog product fits, give expert advice with no product tag.\n\n"
+        f"{context_str}"
+        f"Catalog results:\n{catalog_context}\n\n"
+        f"Crop issue: {state['message']}"
+    )
+
+    final_text = await _llm_content(llm, combined_prompt)
+    return {"response_text": final_text}
+
+async def logistics_node(state: AgentState):
+    from db.customer_state import list_orders
+    llm = get_chat_llm(temperature=0)
+    order_id = state.get("order_id")
+    
+    if order_id:
+        context = get_order_context(state["session_id"], None, order_id)
+    else:
+        orders_data = list_orders(state["session_id"], None)
+        orders = orders_data.get("orders", []) if isinstance(orders_data, dict) else []
+        if orders:
+            # Provide the latest orders as context
+            context = "Customer's recent orders:\n" + "\n".join(
+                f"- Order ID: {o['id']}, Status: {o['status']}, Tracking: {o.get('tracking_number')}, ETA: {o.get('estimated_delivery')}, Product: {o.get('product_name')}"
+                for o in orders[:3]
+            )
+        else:
+            context = "The customer has no recent orders."
+            
+    prompt = f"""You are a helpful agricultural customer support agent.
+The user is asking about logistics, shipping, or order status.
+Here is the available order information for this customer:
+{context}
+
+Answer the user's question clearly and concisely. If they have an order, summarize its status and provide the tracking number.
+Keep it conversational, plain text without markdown bold asterisks (**).
+User message: {state['message']}"""
+    
+    final_text = await _llm_content(llm, prompt)
+    return {"response_text": final_text}
+
+def product_node(state: AgentState):
+    if _is_usage_question(state["message"]):
+        product, error = _resolve_usage_product(state)
+        if error:
+            return {"response_text": error}
+        if product:
+            return {"response_text": _format_product_usage(product)}
+        return {"response_text": _UNKNOWN_USAGE_PRODUCT_MESSAGE}
+
+    recommendation = recommend_product.invoke({"diagnosis": state["message"], "crop": state["message"]})
+    
+    if "No suitable product found" in recommendation:
+        final_text = f"Notice: We do not have a specific product in our catalog for this, but here is some expert advice:\n\n{recommendation.replace('No suitable product found in our catalog for this specific issue.', '')}"
+    else:
+        final_text = f"Recommended Solution & Usage:\n{recommendation}"
+        
+    return {"response_text": final_text}
+
+from agent.tools import get_customer_profile
+
+async def general_node(state: AgentState):
+    llm = ChatOpenAI(temperature=0.3)
+
+    # Memory/profile should come from DB-backed profile.
+    # Cache is only optimization inside get_customer_profile, not the source of truth.
+    try:
+        profile = get_customer_profile(state["session_id"])
+    except Exception:
+        profile = {}
+
+    memory_context = profile.get("context", "") if profile else ""
+
+    # Optional web/weather context.
+    # Use it only for weather, season, local spray timing, and climate-related questions.
+    # Never use it for product identity, dosage, price, or catalog claims.
+    web_context_prompt = ""
+    if (
+        asks_for_web_context
+        and extract_location_hint
+        and get_weather_context
+        and format_web_context_for_prompt
+        and asks_for_web_context(state["message"])
+    ):
+        location = extract_location_hint(state["message"])
+
+        if location:
+            weather_context = get_weather_context(location)
+            web_context_prompt = format_web_context_for_prompt(weather_context)
+        else:
+            return {
+                "response_text": (
+                    "I can use local weather context for spray timing, but I need the city first. "
+                    "Please send the city name and the crop issue."
+                ),
+                "intent": "General",
+            }
+
+    if state["message"] == "INIT_SESSION":
+        from datetime import datetime
+        from db.customer_state import get_active_treatments
+
+        try:
+            treatments = get_active_treatments(state["session_id"], None)
+        except Exception:
+            treatments = []
+
+        if treatments:
+            today = datetime.now().strftime("%Y-%m-%d")
+
+            prompt = f"""You are a friendly agricultural expert checking up on a returning farmer.
+
+Today's date is {today}.
+
+Customer memory:
+{memory_context or "No previous memory available."}
+
+Active treatments on record:
+{json.dumps(treatments, ensure_ascii=False)}
+
+Instructions:
+1. Identify the crop and the issue being treated.
+2. Calculate how many days have passed since start_date if available.
+3. Ask how the crop is doing.
+4. Ask whether the treatment was applied today.
+5. If duration is available, remind them how many days are left.
+6. Keep it short, warm, and conversational.
+7. Plain text only. Do not use markdown bold asterisks (**)."""
+            return {
+                "response_text": await _llm_content(llm, prompt),
+                "intent": "greeting",
+            }
+
+        if memory_context:
+            prompt = f"""You are a friendly agricultural expert greeting a returning farmer.
+
+Use ONLY the recalled profile below to open with a short personalized check-in.
+Ask how their crop is doing and whether the previous issue has improved.
+
+Recalled profile:
+{memory_context}
+
+Instructions:
+- Keep it short.
+- Ask one relevant follow-up question.
+- Plain text only.
+- Do not use markdown bold asterisks (**)."""
+            return {
+                "response_text": await _llm_content(llm, prompt),
+                "intent": "greeting",
+            }
+
+        return {
+            "response_text": (
+                "Hello! I am Agro-Mind, your agricultural assistant. "
+                "How can I help you today?"
+            ),
+            "intent": "greeting",
+        }
+
+    MASTER_SYSTEM_INSTRUCTIONS = """You are an agricultural AI support agent.
+
+Your goal is to provide accurate, evidence-based, and concise answers.
+
+Instructions:
+- Use only retrieved context, catalog context, and conversation memory when answering.
+- Do not invent product names, product IDs, dosage, prices, or catalog claims.
+- If information is insufficient, clearly say what is missing.
+- For plant disease questions, give likely diagnosis and practical next steps.
+- For logistics inquiries, return only relevant order status, ETA, and next steps.
+- For follow-up conversations, use memory to reference previous interactions.
+- Ask at most one relevant follow-up question.
+- Keep responses under 150 words unless the user asks for details.
+- Plain text only. Do not use markdown bold asterisks (**)."""
+
+    context_parts = []
+
+    if memory_context:
+        context_parts.append(f"Conversation/customer memory:\n{memory_context}")
+
+    if web_context_prompt:
+        context_parts.append(web_context_prompt)
+
+    context_str = "\n\n".join(context_parts)
+
+    prompt = f"""{MASTER_SYSTEM_INSTRUCTIONS}
+
+{context_str}
+
+User message:
+{state["message"]}
+
+Answer clearly and concisely."""
+
+    response = await _llm_content(llm, prompt)
+    return {"response_text": response}
+# //
+def _extract_treatment_json(raw: str) -> dict:
+    """Parse a treatment JSON object from an LLM reply that may be fenced."""
+    try:
+        return json.loads(raw.strip())
+    except Exception:
+        match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(0))
+            except Exception:
+                return {}
+    return {}
+
+
+def _save_treatment_in_background(session_id: str, response_text: str, user_message: str) -> None:
+    """Extract treatment details from the LLM response and persist them.
+
+    Runs in a daemon thread so the user receives their reply immediately
+    without waiting for this extra LLM call to complete.
+    """
+    from datetime import datetime
+    from db.customer_state import add_treatment
+
+    extract_prompt = (
+        "Extract the recommended treatment from the text as STRICT JSON with keys "
+        '"crop", "disease", "product_id", "duration", "quantity_per_dose", "instructions". '
+        "For quantity_per_dose: extract the dosage per application (e.g. '400-600g', '50ml'). "
+        "Use null for anything missing. Reply with ONLY the JSON object.\n\n"
+        f"Text: {response_text}\n"
+        f"User message: {user_message}"
+    )
+    try:
+        details = _extract_treatment_json(
+            get_chat_llm(temperature=0).invoke(extract_prompt).content
+        )
+        if details.get("product_id"):
+            add_treatment(
+                session_id,
+                None,
+                start_date=datetime.now().strftime("%Y-%m-%d"),
+                crop=details.get("crop"),
+                disease=details.get("disease"),
+                product_id=details.get("product_id"),
+                duration=details.get("duration"),
+                instructions=details.get("instructions"),
+                quantity_per_dose=details.get("quantity_per_dose"),
+            )
+    except Exception:
         pass
 
-    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group(1))
-        except json.JSONDecodeError:
-            pass
 
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group(0))
-        except json.JSONDecodeError:
-            pass
+def memory_node(state: AgentState):
+    """Stage 4: persist the turn's outcome to relational long-term memory.
 
-    raise ValueError(f"Could not parse JSON from response: {text[:300]}")
+    Treatment extraction (which needs an extra LLM call) is handled in a
+    background thread inside AgroMindAgent.run() so the user is not blocked.
+    """
+    intent = state.get("intent")
+    session_id = state["session_id"]
 
+    profile_dict = {
+        "last_intent": intent,
+        "last_recommended_product": state.get("recommended_product_id"),
+    }
+    if intent in ("Diagnosis", "Product"):
+        profile_dict["infestation_note"] = f"{intent}: {state.get('message', '')[:120]}"
+    update_customer_profile.invoke(
+        {"session_id": session_id, "data": json.dumps(profile_dict)}
+    )
+    return state
 
-# ── OpenAI call helpers ────────────────────────────────────────────────────────
+# --- Routing Logic ---
 
-async def _openai_chat(messages: list[dict], temperature: float = 0.3) -> str:
-    """Async wrapper around the synchronous OpenAI client."""
-    loop = asyncio.get_event_loop()
+def route_after_safety(state: AgentState):
+    if state.get("safety_risk_detected"):
+        return "memory_node"
+    return "intent_node"
 
-    def _call():
-        response = _client.chat.completions.create(
-            model=_MODEL_NAME,
-            messages=messages,
-            temperature=temperature,
-            response_format={"type": "json_object"},
-        )
-        return response.choices[0].message.content
+def route_intent(state: AgentState):
+    intent = state.get("intent", "General")
+    if intent == "Diagnosis":
+        return "diagnosis_node"
+    elif intent == "Logistics":
+        return "logistics_node"
+    elif intent == "Product":
+        return "product_node"
+    else:
+        return "general_node"
 
-    return await loop.run_in_executor(None, _call)
+# --- Build Graph ---
 
+graph_builder = StateGraph(AgentState)
 
-async def _openai_chat_vision(
-    system_prompt: str, user_text: str, image_bytes: bytes, temperature: float = 0.3
-) -> str:
-    """Async wrapper for vision (image + text) OpenAI call."""
-    loop = asyncio.get_event_loop()
-    b64_image = base64.b64encode(image_bytes).decode("utf-8")
+graph_builder.add_node("safety_check_node", safety_check_node)
+graph_builder.add_node("intent_node", intent_node)
+graph_builder.add_node("diagnosis_node", diagnosis_node)
+graph_builder.add_node("logistics_node", logistics_node)
+graph_builder.add_node("product_node", product_node)
+graph_builder.add_node("general_node", general_node)
+graph_builder.add_node("memory_node", memory_node)
 
-    def _call():
-        response = _client.chat.completions.create(
-            model=_MODEL_NAME,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": user_text},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:image/jpeg;base64,{b64_image}"},
-                        },
-                    ],
-                },
-            ],
-            temperature=temperature,
-            response_format={"type": "json_object"},
-        )
-        return response.choices[0].message.content
+graph_builder.set_entry_point("safety_check_node")
+graph_builder.add_conditional_edges("safety_check_node", route_after_safety)
+graph_builder.add_conditional_edges("intent_node", route_intent)
 
-    return await loop.run_in_executor(None, _call)
+for node in ["diagnosis_node", "logistics_node", "product_node", "general_node"]:
+    graph_builder.add_edge(node, "memory_node")
 
+graph_builder.add_edge("memory_node", END)
+langgraph_app = graph_builder.compile()
 
-# ── Main Agent ─────────────────────────────────────────────────────────────────
+# --- Wrapper for FastAPI compatibility ---
 
 class AgroMindAgent:
-    """
-    Single-agent multimodal customer support system powered by OpenAI gpt-4o.
-    """
-
-    def __init__(self) -> None:
-        self._interceptor = SafetyInterceptor()
-        self._catalog_summary = all_products_summary()
-
-        if not _client:
-            logger.warning("⚠️  OPENAI_API_KEY not set — agent will return errors for LLM calls.")
-
-        logger.info("🌿 AgroMindAgent initialized | model=%s", _MODEL_NAME)
-
-    # ── Public entry point ─────────────────────────────────────────────────────
+    def __init__(self):
+        self.app = langgraph_app
 
     async def run(
         self,
@@ -228,242 +666,193 @@ class AgroMindAgent:
         image_bytes: Optional[bytes] = None,
         order_id: Optional[str] = None,
     ) -> AgentResponse:
-        mem = CustomerMemory(session_id)
-        mem.append_turn("user", user_text)
-        memory_ctx = mem.get_context_string()
-
-        # ── Stage 1: Safety Intercept ─────────────────────────────────────────
-        safety_result = self._interceptor.check(user_text)
-        if not safety_result.is_safe:
-            logger.warning("Safety flag [%s]: %s", safety_result.risk_category, safety_result.triggered_phrase)
-            response = _safety_response(safety_result, session_id)
-            mem.append_turn("assistant", response.response_text)
-            mem.update(last_intent="safety_escalation")
-            return response
-
-        # ── Stage 2: Intent Classification ────────────────────────────────────
-        intent = await self._classify_intent(user_text, image_bytes)
-        logger.info("Intent classified: %s", intent)
-
-        # ── Stage 3: Branch routing ───────────────────────────────────────────
-        try:
-            if intent == "diagnosis" or (image_bytes is not None):
-                response = await self._handle_diagnosis(user_text, image_bytes, memory_ctx, session_id)
-            elif intent == "logistics":
-                response = await self._handle_logistics(user_text, memory_ctx, order_id, session_id)
-            elif intent == "product_recommendation":
-                response = await self._handle_product_recommendation(user_text, memory_ctx, session_id)
-            else:
-                response = await self._handle_general_qa(user_text, memory_ctx, session_id)
-
-        except Exception as exc:
-            logger.error("Agent error: %s", exc, exc_info=True)
-            response = AgentResponse(
-                intent="general_qa",
-                safety_risk_detected=False,
-                escalate_human=False,
-                response_text=(
-                    "Dear customer, I'm here! I'm experiencing a technical issue right now. "
-                    f"Error: {str(exc)[:200]}. "
-                    "Please try again in a moment, or contact our human support team."
-                ),
-                session_id=session_id,
+        
+        # Persist the user's turn first, so the relational memory (messages
+        # table) is populated for cross-session recall and context building.
+        mem = _session_memory(session_id)
+        if user_text != "INIT_SESSION":
+            image_b64 = base64.b64encode(image_bytes).decode("utf-8") if image_bytes else None
+            mem.append_turn(
+                "user",
+                user_text,
+                has_image=image_bytes is not None,
+                image_base64=image_b64,
             )
 
-        # ── Stage 4: Memory write ─────────────────────────────────────────────
-        asyncio.create_task(self._async_memory_update(mem, response, user_text))
+        initial_state = {
+            "session_id": session_id,
+            "message": user_text,
+            "image_bytes": image_bytes,
+            "order_id": order_id,
+            "intent": "General",
+            "safety_risk_detected": False,
+            "escalate_human": False,
+            "response_text": "",
+            "recommended_product_id": None,
+            "group_purchase_triggered": False,
+            "human_summary_brief": None,
+            "matched_products": [],
+        }
 
-        mem.append_turn("assistant", response.response_text)
-        response.session_id = session_id
-        return response
+        # LangGraph invoke
+        final_state = await self.app.ainvoke(initial_state)
 
-    # ── Stage 2: Intent Classification ────────────────────────────────────────
+        # Persist the assistant's reply to complete the conversation record.
+        if final_state.get("response_text"):
+            mem.append_turn("assistant", final_state.get("response_text", ""))
 
-    async def _classify_intent(self, user_text: str, image_bytes: Optional[bytes]) -> str:
-        if image_bytes:
-            return "diagnosis"
+        # Attach a product card ONLY for an explicit recommendation.
+        # The recommend_product tool marks a genuine pick with "Product ID: X".
+        # Plain catalog IDs mentioned inside general advice (e.g. dilution
+        # examples like "AF0039 states…") must NOT trigger a product card, and
+        # a "No suitable product found" answer must attach nothing at all.
+        text = final_state.get("response_text", "")
+        from rag.catalog_loader import get_product_by_id
 
-        if not _client:
-            return "general_qa"
-
-        try:
-            messages = [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are an intent classifier. Respond with exactly ONE word from this list: "
-                        "diagnosis, logistics, product_recommendation, general_qa. "
-                        "- diagnosis: crop disease, pest, leaf symptoms, plant image\n"
-                        "- logistics: shipping, order, refund, return, invoice, delivery\n"
-                        "- product_recommendation: which product to use for pest/disease\n"
-                        "- general_qa: anything else"
-                    ),
-                },
-                {"role": "user", "content": user_text},
-            ]
-            # For classification, don't force JSON response format
-            loop = asyncio.get_event_loop()
-
-            def _call():
-                r = _client.chat.completions.create(
-                    model=_MODEL_NAME,
-                    messages=messages,
-                    temperature=0.0,
-                    max_tokens=10,
-                )
-                return r.choices[0].message.content.strip().lower()
-
-            result = await loop.run_in_executor(None, _call)
-
-            for label in ("diagnosis", "logistics", "product_recommendation", "general_qa"):
-                if label in result:
-                    return label
-        except Exception as exc:
-            logger.warning("Intent classification failed: %s", exc)
-
-        return "general_qa"
-
-    # ── Stage 3a: Diagnosis ────────────────────────────────────────────────────
-
-    async def _handle_diagnosis(
-        self, user_text: str, image_bytes: Optional[bytes], memory_ctx: str, session_id: str
-    ) -> AgentResponse:
-        system = (
-            SYSTEM_PROMPT + "\n\n" + FEW_SHOT_EXAMPLES + "\n\n"
-            + DIAGNOSIS_VISION_PROMPT.format(
-                message=user_text or "(No additional text)",
-                memory_context=memory_ctx or "No prior context.",
-                catalog_summary=self._catalog_summary,
-            )
-        ) if image_bytes else (
-            SYSTEM_PROMPT + "\n\n" + FEW_SHOT_EXAMPLES + "\n\n"
-            + DIAGNOSIS_TEXT_PROMPT.format(
-                message=user_text,
-                memory_context=memory_ctx or "No prior context.",
-                catalog_summary=self._catalog_summary,
-            )
+        products = []
+        rec_id = None
+        no_product = (
+            "No suitable product found" in text
+            or "We do not have a specific product" in text
         )
+        if not no_product:
+            # Match new prompt format: [PRODUCT: THE_ID]
+            matches = re.findall(r"\[PRODUCT:\s*([A-Z0-9]+)\]", text)
+            # Fallback for old format just in case: Product ID: THE_ID
+            if not matches:
+                fallback_match = re.search(r"Product ID:\s*([A-Z0-9]+)", text)
+                if fallback_match:
+                    matches = [fallback_match.group(1)]
 
-        if image_bytes:
-            raw = await _openai_chat_vision(system, user_text or "Analyze this crop image.", image_bytes)
-        else:
-            raw = await _openai_chat([
-                {"role": "system", "content": system},
-                {"role": "user", "content": user_text},
-            ])
-
-        return self._parse_response(raw, "diagnosis", session_id)
-
-    # ── Stage 3b: Logistics ────────────────────────────────────────────────────
-
-    async def _handle_logistics(
-        self, user_text: str, memory_ctx: str, order_id: Optional[str], session_id: str
-    ) -> AgentResponse:
-        order_ctx = f"Order ID: {order_id}" if order_id else "No order ID provided."
-        system = (
-            SYSTEM_PROMPT + "\n\n" + FEW_SHOT_EXAMPLES + "\n\n"
-            + LOGISTICS_PROMPT.format(
-                message=user_text,
-                memory_context=memory_ctx or "No prior context.",
-                order_context=order_ctx,
-            )
-        )
-        raw = await _openai_chat([
-            {"role": "system", "content": system},
-            {"role": "user", "content": user_text},
-        ])
-        return self._parse_response(raw, "logistics", session_id)
-
-    # ── Stage 3c: Product Recommendation ──────────────────────────────────────
-
-    async def _handle_product_recommendation(
-        self, user_text: str, memory_ctx: str, session_id: str
-    ) -> AgentResponse:
-        matched = search_catalog(user_text, max_results=3)
-        matched_text = (
-            "\n\n".join(r.summary() for r in matched) if matched else "NO PRODUCTS FOUND"
-        )
-        system = (
-            SYSTEM_PROMPT + "\n\n" + FEW_SHOT_EXAMPLES + "\n\n"
-            + PRODUCT_RECOMMENDATION_PROMPT.format(
-                message=user_text,
-                memory_context=memory_ctx or "No prior context.",
-                matched_products=matched_text,
-            )
-        )
-        raw = await _openai_chat([
-            {"role": "system", "content": system},
-            {"role": "user", "content": user_text},
-        ])
-        resp = self._parse_response(raw, "product_recommendation", session_id)
-        resp.matched_products = [r.to_dict() for r in matched]
-        if matched and not resp.recommended_product_id:
-            resp.recommended_product_id = matched[0].product_id
-        if resp.recommended_product_id:
-            resp.group_purchase_triggered = True
-        return resp
-
-    # ── Stage 3d: General QA ──────────────────────────────────────────────────
-
-    async def _handle_general_qa(
-        self, user_text: str, memory_ctx: str, session_id: str
-    ) -> AgentResponse:
-        system = (
-            SYSTEM_PROMPT + "\n\n" + FEW_SHOT_EXAMPLES + "\n\n"
-            + GENERAL_QA_PROMPT.format(
-                message=user_text,
-                memory_context=memory_ctx or "No prior context.",
-            )
-        )
-        raw = await _openai_chat([
-            {"role": "system", "content": system},
-            {"role": "user", "content": user_text},
-        ])
-        return self._parse_response(raw, "general_qa", session_id)
-
-    # ── JSON response parser ───────────────────────────────────────────────────
-
-    def _parse_response(self, raw: str, fallback_intent: str, session_id: str) -> AgentResponse:
-        try:
-            data = _extract_json(raw)
-        except ValueError:
-            logger.warning("JSON parse failed, using raw text as response_text")
-            data = {}
+            if matches:
+                rec_id = matches[0]
+                for p_id in matches:
+                    product_record = get_product_by_id(p_id)
+                    if product_record:
+                        products.append(product_record.to_dict())
+                
+                # Strip product tags from text so they don't show to user
+                text = re.sub(r"\[PRODUCT:\s*[A-Z0-9]+\]", "", text).strip()
+                text = re.sub(r"Product ID:\s*[A-Z0-9]+.*", "", text, flags=re.IGNORECASE).strip()
+                final_state["response_text"] = text
 
         return AgentResponse(
-            intent=data.get("intent", fallback_intent),
-            safety_risk_detected=bool(data.get("safety_risk_detected", False)),
-            escalate_human=bool(data.get("escalate_human", False)),
-            response_text=data.get("response_text", raw),
-            recommended_product_id=data.get("recommended_product_id") or None,
-            group_purchase_triggered=bool(data.get("group_purchase_triggered", False)),
-            human_summary_brief=data.get("human_summary_brief") or None,
-            session_id=session_id,
+            intent=final_state.get("intent", "General").lower(),
+            safety_risk_detected=final_state.get("safety_risk_detected", False),
+            escalate_human=final_state.get("escalate_human", False),
+            response_text=final_state.get("response_text", ""),
+            recommended_product_id=rec_id,
+            group_purchase_triggered=bool(rec_id),
+            human_summary_brief=final_state.get("human_summary_brief"),
+            matched_products=products,
+            session_id=session_id
         )
 
-    # ── Stage 4: Async memory update ──────────────────────────────────────────
+    async def stream(
+        self,
+        session_id: str,
+        user_text: str,
+        image_bytes: Optional[bytes] = None,
+        order_id: Optional[str] = None,
+    ):
+        """Async generator for streaming responses.
 
-    @staticmethod
-    async def _async_memory_update(
-        mem: CustomerMemory, response: AgentResponse, user_text: str
-    ) -> None:
-        try:
-            user_lower = user_text.lower()
-            detected_crop = None
-            for crop in ALLOWED_CROPS:
-                if crop in user_lower:
-                    detected_crop = crop
-                    break
+        Yields dicts of two shapes:
+          {"type": "token",    "content": "<text chunk>"}
+          {"type": "metadata", "data":    {<AgentResponse dict>}}
 
-            mem.update(
-                crop_type=detected_crop,
-                last_product_id=response.recommended_product_id,
-                last_intent=response.intent,
-                infestation_note=(
-                    f"{response.intent}: {user_text[:120]}"
-                    if response.intent == "diagnosis"
-                    else None
-                ),
-            )
-        except Exception as exc:
-            logger.debug("Memory update failed (non-fatal): %s", exc)
+        Tokens come from async LangGraph nodes (general_node, diagnosis_node
+        text path). Nodes that use sync tools (product_node, image diagnosis)
+        yield no tokens — their full response arrives in the metadata event.
+        """
+        # Persist the user turn before the agent runs so reopening the session
+        # immediately still shows the user's message.
+        if user_text != "INIT_SESSION":
+            image_b64 = base64.b64encode(image_bytes).decode("utf-8") if image_bytes else None
+            try:
+                _session_memory(session_id).append_turn(
+                    "user",
+                    user_text,
+                    has_image=image_bytes is not None,
+                    image_base64=image_b64,
+                )
+            except Exception:
+                pass
+
+        initial_state = {
+            "session_id": session_id,
+            "message": user_text,
+            "image_bytes": image_bytes,
+            "order_id": order_id,
+            "intent": "General",
+            "safety_risk_detected": False,
+            "escalate_human": False,
+            "response_text": "",
+            "recommended_product_id": None,
+            "group_purchase_triggered": False,
+            "human_summary_brief": None,
+            "matched_products": [],
+        }
+
+        # astream with ["values", "messages"] gives us:
+        #   "messages" chunks → (AIMessageChunk, metadata) for token streaming
+        #   "values"   chunks → complete state snapshot after each node
+        final_state: dict = dict(initial_state)
+
+        async for chunk in self.app.astream(
+            initial_state,
+            stream_mode=["values", "messages"],
+        ):
+            mode, data = chunk
+            if mode == "messages":
+                msg_chunk, _ = data
+                content = getattr(msg_chunk, "content", "") or ""
+                if content:
+                    yield {"type": "token", "content": content}
+            else:  # "values" — complete state snapshot; last one is final
+                final_state = data
+
+        # ── Post-processing (mirrors run()) ────────────────────────────────
+        if final_state.get("response_text"):
+            _asst_text = final_state["response_text"]
+            threading.Thread(
+                target=lambda: _session_memory(session_id).append_turn("assistant", _asst_text),
+                daemon=True,
+            ).start()
+
+        _raw_text = final_state.get("response_text", "")
+        text = _raw_text
+        from rag.catalog_loader import get_product_by_id
+        products = []
+        rec_id = None
+        no_product = (
+            "No suitable product found" in text
+            or "We do not have a specific product" in text
+        )
+        if not no_product:
+            matches = re.findall(r"\[PRODUCT:\s*([A-Z0-9]+)\]", text)
+            if not matches:
+                fb = re.search(r"Product ID:\s*([A-Z0-9]+)", text)
+                if fb:
+                    matches = [fb.group(1)]
+            if matches:
+                rec_id = matches[0]
+                for p_id in matches:
+                    rec = get_product_by_id(p_id)
+                    if rec:
+                        products.append(rec.to_dict())
+                text = re.sub(r"\[PRODUCT:\s*[A-Z0-9]+\]", "", text).strip()
+                text = re.sub(r"Product ID:\s*[A-Z0-9]+.*", "", text, flags=re.IGNORECASE).strip()
+
+        response = AgentResponse(
+            intent=final_state.get("intent", "General").lower(),
+            safety_risk_detected=final_state.get("safety_risk_detected", False),
+            escalate_human=final_state.get("escalate_human", False),
+            response_text=text,
+            recommended_product_id=rec_id,
+            group_purchase_triggered=bool(rec_id),
+            human_summary_brief=final_state.get("human_summary_brief"),
+            matched_products=products,
+            session_id=session_id,
+        )
+        yield {"type": "metadata", "data": response.to_dict()}
