@@ -1,0 +1,10 @@
+{"id":"general_authenticity_en","message":"Is this product authentic?","expected_intent":"general_qa"}
+{"id":"general_greeting_en","message":"Hello, who are you?","expected_intent":"general_qa"}
+{"id":"diagnosis_tomato_spots_en","message":"My tomato leaves have yellow spots","expected_intent":"diagnosis"}
+{"id":"diagnosis_strawberry_powder_en","message":"My strawberry leaves have white powder","expected_intent":"diagnosis"}
+{"id":"product_recommendation_en","message":"Which product should I use for powdery mildew on strawberry?","expected_intent":"product"}
+{"id":"product_dosage_en","message":"How much water should I mix with this pesticide?","expected_intent":"product"}
+{"id":"product_price_en","message":"What is the price of this product?","expected_intent":"product"}
+{"id":"logistics_shipping_en","message":"What courier service do you use?","expected_intent":"logistics"}
+{"id":"logistics_delivery_en","message":"When will my order arrive?","expected_intent":"logistics"}
+{"id":"logistics_refund_en","message":"The package arrived damaged and I want a refund","expected_intent":"logistics"}
