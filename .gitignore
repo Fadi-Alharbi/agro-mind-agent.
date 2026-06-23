@@ -41,3 +41,8 @@ Thumbs.db
 db/*.db
 db/chroma_db/
 rag/chroma_store/
+
+# ── Archives (project snapshots don't belong in the repo) ───────────────────────
+*.zip
+*.tar.gz
+*.tgz
