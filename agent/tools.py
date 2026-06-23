@@ -142,6 +142,17 @@ def classify_intent(message: str) -> str:
         "pesticide", "fungicide", "insecticide", "treatment for", "what medicine",
         "which medicine", "what chemical", "suggest",
     ]
+    _PRODUCT_REQUEST_PHRASES = [
+    "which product",
+    "what product",
+    "recommend a product",
+    "suggest a product",
+    "which pesticide",
+    "which fungicide",
+    "which herbicide",
+    "what should i use",
+    "what can i use",
+    ]
 
     logistics_score = sum(1 for k in _LOGISTICS if k in msg_lower)
     diagnosis_score = sum(1 for k in _DIAGNOSIS if k in msg_lower)
@@ -150,10 +161,16 @@ def classify_intent(message: str) -> str:
     best = max(logistics_score, diagnosis_score, product_score)
     if best == 0:
         return "General"
+
     if logistics_score == best:
         return "Logistics"
+
+    if any(phrase in msg_lower for phrase in _PRODUCT_REQUEST_PHRASES):
+        return "Product"
+
     if diagnosis_score >= product_score:
         return "Diagnosis"
+
     return "Product"
 
 @tool
@@ -263,29 +280,77 @@ def check_product_safety(product_id: str) -> str:
         return f"Safety constraints not found for product {product_id}."
         
     return f"Safety constraints for {product_id}:\n{docs[0].page_content}"
+CHEMICAL_EXPOSURE_TERMS = (
+    "swallowed pesticide",
+    "swallowed herbicide",
+    "drank pesticide",
+    "drank herbicide",
+    "pesticide got in my eye",
+    "herbicide got in my eye",
+    "got in my eye",
+    "in my eye",
+    "can't breathe",
+    "cannot breathe",
+    "difficulty breathing",
+    "spilled on my skin",
+    "on my skin",
+    "chemical burn",
+    "poisoning",
+    "poisoned",
+)
+
+
+def _chemical_exposure_risk(message: str) -> bool:
+    normalized = (message or "").casefold()
+    return any(term in normalized for term in CHEMICAL_EXPOSURE_TERMS)
+
+
 
 @tool
 def detect_escalation_risk(message: str) -> bool:
     """
-    Checks if a safety/poisoning intent is detected in the message. 
-    Returns True if an escalation is required.
+    Checks self-harm and pesticide exposure risk.
     """
+    if _chemical_exposure_risk(message):
+        return True
+
     result = safety_interceptor.check(message)
     return not result.is_safe
 
-@tool
-def create_human_alert() -> str:
-    """
-    Stops autonomous product recommendations, alerts a human, and provides safe fallback text.
-    """
-    return (
-        "Dear customer, your safety and life are of utmost importance. "
-        "Automated support has been stopped to protect your health. "
-        "A human expert has been alerted to assist you immediately. "
-        "Please know that you are not alone — help is on the way. "
-        "If you are in immediate danger, please call your local emergency services."
-    )
 
+@tool
+def create_human_alert(session_id: str, message: str, risk_category: str = "safety") -> str:
+    """
+    Creates a real escalation ticket in the database, then returns safe customer-facing text.
+    """
+    try:
+        from db.customer_state import create_escalation
+
+        ticket = create_escalation(
+            session_id=session_id,
+            external_id=None,
+            risk_category=risk_category,
+            triggered_phrase=message[:300],
+            human_summary=(
+                "Safety escalation triggered by the automated agent. "
+                "A human support review is required before continuing commercial or pesticide advice."
+            ),
+        )
+
+        ticket_id = ticket.get("id")
+
+        return (
+            "Automated support has been stopped for safety. "
+            f"A human support ticket has been created. Ticket ID: {ticket_id}. "
+            "If this is an emergency, contact local emergency services immediately."
+        )
+
+    except Exception:
+        return (
+            "Automated support has been stopped for safety. "
+            "A human review is required, but the system could not create a ticket right now. "
+            "If this is an emergency, contact local emergency services immediately."
+        )
 @tool
 def update_customer_profile(session_id: str, data: str) -> str:
     """
@@ -315,28 +380,29 @@ def update_customer_profile(session_id: str, data: str) -> str:
         return f"Database error: {e}"
 
 def get_customer_profile(session_id: str) -> dict:
-    """Return customer profile, served from memory cache (0 ms after first fetch).
+    """
+    Return customer profile.
 
-    First call for a session_id returns {} immediately and starts a background
-    DB fetch (~5s). The next message (and all subsequent ones) gets the real
-    profile from cache at 0ms. Cache TTL is 60s; invalidated on profile update.
+    Database is the source of truth.
+    Cache is only used to speed up repeated reads.
     """
     with _profile_lock:
         entry = _profile_cache.get(session_id)
         if entry:
             ts, profile = entry
             if time.time() - ts < _PROFILE_TTL:
-                return profile  # Cache hit — 0 ms
+                return profile
 
-        # Cache miss or stale — trigger background fetch, return stale/empty now
-        if session_id not in _profile_fetching:
-            _profile_fetching.add(session_id)
-            threading.Thread(
-                target=_fetch_profile_bg, args=(session_id,), daemon=True
-            ).start()
+    try:
+        profile = get_profile(session_id, None)
+        profile["context"] = _get_context_string_no_init(session_id)
+    except Exception:
+        profile = {}
 
-        return entry[1] if entry else {}
+    with _profile_lock:
+        _profile_cache[session_id] = (time.time(), profile)
 
+    return profile
 
 def invalidate_profile_cache(session_id: str) -> None:
     """Expire the cached profile so the next call re-fetches from DB."""

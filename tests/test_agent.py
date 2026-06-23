@@ -1,7 +1,10 @@
 import pytest
 import asyncio
 from unittest.mock import patch, MagicMock
-from agent.orchestrator import AgroMindAgent
+from agent.orchestrator import (
+    AgroMindAgent,
+    _contextualize_short_sales_reply,
+)
 
 @pytest.fixture
 def agent():
@@ -59,3 +62,19 @@ def test_normal_general_qa(agent):
                     assert result.escalate_human is False
                     assert result.intent == "general"
                     assert result.response_text == "All our products are authentic."
+
+
+def test_short_arabic_weed_reply_uses_previous_sales_context():
+    history = [
+        {
+            "role": "assistant",
+            "text": "What type of weeds do you see in your citrus orchard?",
+        }
+    ]
+
+    with patch("agent.orchestrator._recent_chat_history", return_value=history):
+        expanded = _contextualize_short_sales_reply("session-1", "متسلقة")
+
+    assert expanded is not None
+    assert "citrus orchard" in expanded
+    assert "Recommend a suitable catalog product" in expanded

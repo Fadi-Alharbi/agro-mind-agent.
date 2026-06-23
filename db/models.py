@@ -30,7 +30,8 @@ from sqlalchemy import (
     Text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-
+from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime
+from datetime import datetime
 from db.engine import Base
 
 
@@ -242,16 +243,15 @@ class Refund(Base):
 class Escalation(Base):
     __tablename__ = "escalations"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    session_id: Mapped[Optional[str]] = mapped_column(ForeignKey("sessions.id"), index=True)
-    risk_category: Mapped[Optional[str]] = mapped_column(String(64))
-    triggered_phrase: Mapped[Optional[str]] = mapped_column(String(512))
-    human_summary: Mapped[Optional[str]] = mapped_column(Text)
-    resolved: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String, index=True, nullable=False)
+    risk_category = Column(String, nullable=False)
+    triggered_phrase = Column(Text, nullable=True)
+    human_summary = Column(Text, nullable=True)
+    resolved = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
-
-# ── Follow-ups (proactive re-engagement — Proposal slide 7) ──────────────────────
+# ── Follow-ups (proactive re-engagement) ──────────────────────
 class FollowUp(Base):
     __tablename__ = "follow_ups"
 

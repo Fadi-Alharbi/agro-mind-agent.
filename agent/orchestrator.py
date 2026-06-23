@@ -20,6 +20,16 @@ from agent.tools import (
     create_human_alert,
     update_customer_profile
 )
+from agent.web_context import (
+    asks_for_web_context,
+    extract_location_hint,
+    get_weather_context,
+    format_web_context_for_prompt,
+)
+
+# Backward-compatible alias used by older tests. In production this still
+# returns the Qwen/DashScope-configured LangChain client from agent.llm.
+ChatOpenAI = get_chat_llm
 
 # Return contract expected by backend
 class AgentResponse:
@@ -62,6 +72,81 @@ class AgentState(TypedDict):
     human_summary_brief: Optional[str]
     matched_products: list
 
+
+class _NoopMemory:
+    """Fallback when the persistence layer is unavailable."""
+
+    def append_turn(self, *args, **kwargs) -> int:
+        return 0
+
+    def chat_history(self) -> list[dict]:
+        return []
+
+
+def _session_memory(session_id: str):
+    try:
+        return CustomerMemory(session_id)
+    except Exception:
+        return _NoopMemory()
+
+
+def _recent_chat_history(session_id: str, current_message: str, limit: int = 6) -> list[dict]:
+    """Read recent turns, excluding the current user message when already saved."""
+    try:
+        history = _session_memory(session_id).chat_history()
+    except Exception:
+        return []
+
+    if history and history[-1].get("role") == "user" and history[-1].get("text") == current_message:
+        history = history[:-1]
+    return history[-limit:]
+
+
+def _contextualize_short_sales_reply(session_id: str, message: str) -> Optional[str]:
+    """Expand short farmer replies using the immediately preceding chat context."""
+    stripped = (message or "").strip()
+    if not stripped:
+        return None
+
+    short_weed_replies = {
+        "متسلقة", "متسلقه", "متسلق", "متسلقات",
+        "ورقية", "عريضة", "عريضه", "عشبية", "عشبيه",
+        "حشائش", "حشايش", "اعشاب", "أعشاب",
+    }
+    if stripped not in short_weed_replies and len(stripped.split()) > 3:
+        return None
+
+    history_text = " ".join(
+        turn.get("text", "") for turn in _recent_chat_history(session_id, stripped)
+    ).lower()
+    weed_context = any(term in history_text for term in (
+        "حشائش", "حشايش", "اعشاب", "أعشاب", "weed", "weeds", "herbicide",
+    ))
+    orchard_context = any(term in history_text for term in (
+        "حمضيات", "بستان", "ليمون", "برتقال", "citrus", "orchard", "fruit tree",
+    ))
+
+    if stripped in short_weed_replies and weed_context:
+        crop_context = "citrus orchard" if orchard_context else "the crop mentioned earlier"
+        return (
+            "The farmer is answering a previous clarification question about weed type. "
+            f"Context: {crop_context}. Weed type: {stripped}. "
+            "Recommend a suitable catalog product now; do not require a structured prompt."
+        )
+
+    return None
+
+
+async def _llm_content(llm, prompt: str) -> str:
+    """Call async LLMs when available, with sync fallback for test doubles."""
+    try:
+        result = llm.ainvoke(prompt)
+        if hasattr(result, "__await__"):
+            return (await result).content
+    except TypeError:
+        pass
+    return llm.invoke(prompt).content
+
 # --- Graph Nodes ---
 
 def safety_check_node(state: AgentState):
@@ -69,7 +154,11 @@ def safety_check_node(state: AgentState):
     msg = state["message"]
     risk = detect_escalation_risk.invoke(msg)
     if risk:
-        alert_text = create_human_alert.invoke("")
+        alert_text = create_human_alert.invoke({
+            "session_id": state["session_id"],
+            "message": msg,
+            "risk_category": "safety",
+        })
         return {
             "safety_risk_detected": True,
             "escalate_human": True,
@@ -86,7 +175,13 @@ def intent_node(state: AgentState):
     
     if state["message"] == "INIT_SESSION":
         return {"intent": "General"}
-        
+
+    contextual_message = _contextualize_short_sales_reply(
+        state["session_id"], state["message"]
+    )
+    if contextual_message:
+        return {"intent": "Product", "message": contextual_message}
+
     intent = classify_intent.invoke(state["message"])
     return {"intent": intent}
 
@@ -136,7 +231,7 @@ async def diagnosis_node(state: AgentState):
         f"Crop issue: {state['message']}"
     )
 
-    final_text = (await llm.ainvoke(combined_prompt)).content
+    final_text = await _llm_content(llm, combined_prompt)
     return {"response_text": final_text}
 
 async def logistics_node(state: AgentState):
@@ -167,7 +262,7 @@ Answer the user's question clearly and concisely. If they have an order, summari
 Keep it conversational, plain text without markdown bold asterisks (**).
 User message: {state['message']}"""
     
-    final_text = (await llm.ainvoke(prompt)).content
+    final_text = await _llm_content(llm, prompt)
     return {"response_text": final_text}
 
 def product_node(state: AgentState):
@@ -183,13 +278,46 @@ def product_node(state: AgentState):
 from agent.tools import get_customer_profile
 
 async def general_node(state: AgentState):
-    llm = get_chat_llm(temperature=0.3)
-    profile = get_customer_profile(state["session_id"])
+    llm = ChatOpenAI(temperature=0.3)
+
+    # Memory/profile should come from DB-backed profile.
+    # Cache is only optimization inside get_customer_profile, not the source of truth.
+    try:
+        profile = get_customer_profile(state["session_id"])
+    except Exception:
+        profile = {}
+
     memory_context = profile.get("context", "") if profile else ""
+
+    # Optional web/weather context.
+    # Use it only for weather, season, local spray timing, and climate-related questions.
+    # Never use it for product identity, dosage, price, or catalog claims.
+    web_context_prompt = ""
+    if (
+        asks_for_web_context
+        and extract_location_hint
+        and get_weather_context
+        and format_web_context_for_prompt
+        and asks_for_web_context(state["message"])
+    ):
+        location = extract_location_hint(state["message"])
+
+        if location:
+            weather_context = get_weather_context(location)
+            web_context_prompt = format_web_context_for_prompt(weather_context)
+        else:
+            return {
+                "response_text": (
+                    "I can use local weather context for spray timing, but I need the city first. "
+                    "Please send the city name and the crop issue."
+                ),
+                "intent": "General",
+            }
 
     if state["message"] == "INIT_SESSION":
         from datetime import datetime
         from db.customer_state import get_active_treatments
+
         try:
             treatments = get_active_treatments(state["session_id"], None)
         except Exception:
@@ -197,50 +325,94 @@ async def general_node(state: AgentState):
 
         if treatments:
             today = datetime.now().strftime("%Y-%m-%d")
-            prompt = f"""You are a friendly agricultural expert checking up on your farmer friend.
-Today's date is {today}.
-The customer has these active treatments on record (JSON): {json.dumps(treatments, ensure_ascii=False)}
 
-Instruction:
-1. Identify the crop and the disease being treated.
-2. Calculate how many days have passed since 'start_date'.
-3. Ask explicitly how the crop is doing ("How are the tomatoes doing?").
-4. Ask whether they applied the treatment today.
-5. If a 'duration' is given, remind them how many days are left.
-6. Be warm and conversational, plain text without markdown bold asterisks (**)."""
-            return {"response_text": (await llm.ainvoke(prompt)).content, "intent": "greeting"}
+            prompt = f"""You are a friendly agricultural expert checking up on a returning farmer.
+
+Today's date is {today}.
+
+Customer memory:
+{memory_context or "No previous memory available."}
+
+Active treatments on record:
+{json.dumps(treatments, ensure_ascii=False)}
+
+Instructions:
+1. Identify the crop and the issue being treated.
+2. Calculate how many days have passed since start_date if available.
+3. Ask how the crop is doing.
+4. Ask whether the treatment was applied today.
+5. If duration is available, remind them how many days are left.
+6. Keep it short, warm, and conversational.
+7. Plain text only. Do not use markdown bold asterisks (**)."""
+            return {
+                "response_text": await _llm_content(llm, prompt),
+                "intent": "greeting",
+            }
 
         if memory_context:
             prompt = f"""You are a friendly agricultural expert greeting a returning farmer.
-Use ONLY the recalled profile below to open with a warm, personalised check-in:
-ask how their crop is doing and whether the previous issue has improved.
-Keep it short and conversational, plain text without markdown bold asterisks (**).
+
+Use ONLY the recalled profile below to open with a short personalized check-in.
+Ask how their crop is doing and whether the previous issue has improved.
 
 Recalled profile:
-{memory_context}"""
-            return {"response_text": (await llm.ainvoke(prompt)).content, "intent": "greeting"}
+{memory_context}
 
-        return {"response_text": "Hello! I am Agro-Mind, your agricultural assistant. How can I help you today?", "intent": "greeting"}
+Instructions:
+- Keep it short.
+- Ask one relevant follow-up question.
+- Plain text only.
+- Do not use markdown bold asterisks (**)."""
+            return {
+                "response_text": await _llm_content(llm, prompt),
+                "intent": "greeting",
+            }
+
+        return {
+            "response_text": (
+                "Hello! I am Agro-Mind, your agricultural assistant. "
+                "How can I help you today?"
+            ),
+            "intent": "greeting",
+        }
 
     MASTER_SYSTEM_INSTRUCTIONS = """You are an agricultural AI support agent.
-Your goal is to provide accurate, evidence-based, and concise answers while minimizing response latency.
+
+Your goal is to provide accurate, evidence-based, and concise answers.
+
 Instructions:
-- Use only the retrieved context and conversation memory when answering.
-- Do not repeat information unnecessarily.
-- If multiple retrieved documents contain similar information, summarize them into a single concise answer.
-- Limit responses to the information necessary to solve the user's problem.
-- When confidence is low or information is insufficient, clearly state the limitation instead of generating speculative content.
-- For plant disease diagnosis: State the most likely diagnosis. Provide confidence level. Give the top recommended actions. Avoid lengthy explanations unless requested.
-- For logistics inquiries: Return only the relevant order status, ETA, and next steps.
-- For follow-up conversations: Use memory to reference previous interactions. Ask at most one relevant follow-up question.
-- Prioritize clarity, correctness, and speed.
-- Keep responses under 150 words unless the user explicitly requests a detailed explanation."""
+- Use only retrieved context, catalog context, and conversation memory when answering.
+- Do not invent product names, product IDs, dosage, prices, or catalog claims.
+- If information is insufficient, clearly say what is missing.
+- For plant disease questions, give likely diagnosis and practical next steps.
+- For logistics inquiries, return only relevant order status, ETA, and next steps.
+- For follow-up conversations, use memory to reference previous interactions.
+- Ask at most one relevant follow-up question.
+- Keep responses under 150 words unless the user asks for details.
+- Plain text only. Do not use markdown bold asterisks (**)."""
 
-    context_str = f"Context from previous interactions: {memory_context}. " if memory_context else ""
-    prompt = f"{MASTER_SYSTEM_INSTRUCTIONS}\n\n{context_str}Answer nicely and format your response clearly using plain text without markdown bold asterisks (**). User message: {state['message']}"
-    response = (await llm.ainvoke(prompt)).content
+    context_parts = []
+
+    if memory_context:
+        context_parts.append(f"Conversation/customer memory:\n{memory_context}")
+
+    if web_context_prompt:
+        context_parts.append(web_context_prompt)
+
+    context_str = "\n\n".join(context_parts)
+
+    prompt = f"""{MASTER_SYSTEM_INSTRUCTIONS}
+
+{context_str}
+
+User message:
+{state["message"]}
+
+Answer clearly and concisely."""
+
+    response = await _llm_content(llm, prompt)
     return {"response_text": response}
-
+# //
 def _extract_treatment_json(raw: str) -> dict:
     """Parse a treatment JSON object from an LLM reply that may be fenced."""
     try:
@@ -368,7 +540,7 @@ class AgroMindAgent:
         
         # Persist the user's turn first, so the relational memory (messages
         # table) is populated for cross-session recall and context building.
-        mem = CustomerMemory(session_id)
+        mem = _session_memory(session_id)
         if user_text != "INIT_SESSION":
             image_b64 = base64.b64encode(image_bytes).decode("utf-8") if image_bytes else None
             mem.append_turn(
@@ -482,7 +654,7 @@ class AgroMindAgent:
             image_b64 = base64.b64encode(image_bytes).decode("utf-8") if image_bytes else None
             def _user_turn_fn(_sid=session_id, _txt=user_text, _b64=image_b64, _img=image_bytes):
                 try:
-                    CustomerMemory(_sid).append_turn(
+                    _session_memory(_sid).append_turn(
                         "user", _txt,
                         has_image=_img is not None,
                         image_base64=_b64,
@@ -536,7 +708,7 @@ class AgroMindAgent:
         if final_state.get("response_text"):
             _asst_text = final_state["response_text"]
             threading.Thread(
-                target=lambda: CustomerMemory(session_id).append_turn("assistant", _asst_text),
+                target=lambda: _session_memory(session_id).append_turn("assistant", _asst_text),
                 daemon=True,
             ).start()
 

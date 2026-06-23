@@ -142,6 +142,26 @@ async def get_catalog():
     }
 
 
+@app.get("/catalog/preview")
+async def get_catalog_preview(limit: int = 8):
+    """Return a small catalog payload for sidebar previews."""
+    from rag.catalog_loader import get_catalog
+    products = get_catalog()
+    limit = max(1, min(limit, 50))
+    return {
+        "count": len(products),
+        "products": [
+            {
+                "product_id": p.product_id,
+                "product_name": p.product_name,
+                "english_name": p.english_name,
+                "product_type": p.product_type,
+            }
+            for p in products[:limit]
+        ],
+    }
+
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """
@@ -219,6 +239,53 @@ class CartAddRequest(BaseModel):
 class SessionRequest(BaseModel):
     session_id: str
 
+class ProfileUpdateRequest(BaseModel):
+    session_id: str
+    name: Optional[str] = None
+    location: Optional[str] = None
+    crop_type: Optional[str] = None
+
+
+@app.get("/profile")
+async def profile(session_id: str):
+    """Return the DB-backed customer profile for the current session."""
+    from db.customer_state import get_profile
+
+    try:
+        return get_profile(session_id, None)
+    except Exception as exc:
+        logger.error("get_profile failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/profile")
+async def update_profile_api(request: ProfileUpdateRequest):
+    """Update editable customer profile fields."""
+    from db.customer_state import update_profile
+
+    try:
+        return update_profile(
+            request.session_id,
+            None,
+            name=request.name,
+            location=request.location,
+            crop_type=request.crop_type,
+        )
+    except Exception as exc:
+        logger.error("update_profile failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/history")
+async def history(session_id: str, limit: int = 50):
+    """Return DB-backed chat history for the current customer/session."""
+    from db.customer_state import get_chat_history
+
+    try:
+        return get_chat_history(session_id, None, limit=limit)
+    except Exception as exc:
+        logger.error("get_chat_history failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
 
 @app.get("/cart")
 async def view_cart(session_id: str):
@@ -318,6 +385,23 @@ async def todays_tasks(session_id: str):
         logger.error("todays_tasks failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=str(exc))
 
+@app.get("/followups/due")
+def due_followups(session_id: str):
+    """Return today's due follow-up tasks for the given session only.
+
+    Scoped to the caller's session_id to avoid leaking other customers'
+    follow-ups (IDOR). Mirrors /tasks/today.
+    """
+    from db.customer_state import get_todays_tasks
+    try:
+        tasks = get_todays_tasks(session_id, None)
+        return {
+            "count": len(tasks),
+            "followups": tasks,
+        }
+    except Exception as exc:
+        logger.error("due_followups failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
 
 class TaskDoneRequest(BaseModel):
     session_id: str

@@ -29,6 +29,17 @@ from memory.customer_memory import CustomerMemory
 from rag.catalog_loader import get_product_by_id
 
 
+GROUP_BUY_MIN_QUANTITY = 10
+
+
+def _validate_group_buy_quantity(quantity: int) -> None:
+    if quantity < GROUP_BUY_MIN_QUANTITY:
+        raise ValueError(
+            f"Group buy requires at least {GROUP_BUY_MIN_QUANTITY} units. "
+            f"Current group quantity would be {quantity}."
+        )
+
+
 def _ensure_customer(session_id: str, external_id: Optional[str]) -> int:
     """Ensure the customer/session rows exist and return customer_id."""
     memory = CustomerMemory(session_id, external_id=external_id)
@@ -78,6 +89,7 @@ def _cart_to_dict(cart: Cart) -> dict:
         "status": cart.status,
         "items": items,
         "total_amount": total,
+        "group_buy_min_quantity": GROUP_BUY_MIN_QUANTITY,
     }
 
 
@@ -199,6 +211,8 @@ def checkout_cart(session_id: str, external_id: Optional[str]) -> dict:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
         orders: list[Order] = []
         for idx, item in enumerate(cart.items, start=1):
+            if item.is_group_buy and int(item.quantity or 0) < GROUP_BUY_MIN_QUANTITY:
+                _validate_group_buy_quantity(int(item.quantity or 0))
             line_total = float(item.unit_price or 0.0) * int(item.quantity or 0)
             order = Order(
                 id=f"PDD{stamp}-{customer_id}-{idx}",
@@ -515,15 +529,18 @@ def add_cart_item(
                 CartItem.is_group_buy == is_group_buy,
             )
         ).first()
+        next_quantity = (int(item.quantity or 0) if item else 0) + max(1, quantity)
+        if is_group_buy and next_quantity < GROUP_BUY_MIN_QUANTITY:
+            _validate_group_buy_quantity(next_quantity)
         unit_price = product.group_price if is_group_buy else product.single_price
         if item:
-            item.quantity += max(1, quantity)
+            item.quantity = next_quantity
             item.unit_price = unit_price
         else:
             db.add(CartItem(
                 cart_id=cart.id,
                 product_id=product_id,
-                quantity=max(1, quantity),
+                quantity=next_quantity,
                 unit_price=unit_price,
                 is_group_buy=is_group_buy,
                 diagnosis_id=diagnosis_id,
@@ -785,4 +802,36 @@ def get_todays_tasks(session_id: str, external_id: Optional[str]) -> list[dict]:
                     **task,
                 })
     return todays
+def create_escalation(
+    session_id: str,
+    external_id=None,
+    *,
+    risk_category: str,
+    triggered_phrase: str,
+    human_summary: str,
+) -> dict:
+    from db.engine import SessionLocal
+    from db.models import Escalation
 
+    db = SessionLocal()
+    try:
+        escalation = Escalation(
+            session_id=session_id,
+            risk_category=risk_category,
+            triggered_phrase=triggered_phrase,
+            human_summary=human_summary,
+            resolved=False,
+        )
+
+        db.add(escalation)
+        db.commit()
+        db.refresh(escalation)
+
+        return {
+            "id": escalation.id,
+            "session_id": escalation.session_id,
+            "risk_category": escalation.risk_category,
+            "resolved": escalation.resolved,
+        }
+    finally:
+        db.close()
