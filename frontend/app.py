@@ -250,15 +250,15 @@ st.markdown("""
     line-height: 1.45;
   }
 
-  /* === Product card — one flat datasheet with purchase controls === */
+  /* === Product card — compact purchase panel === */
   [class*="st-key-product_card_"] {
-    background: oklch(0.99 0.006 150);
-    border: 1px solid var(--border-2);
-    border-radius: var(--radius-sm);
+    background: transparent;
+    border: 0;
+    border-radius: 0;
     padding: 0;
     margin: var(--space-xs) 0 var(--space-md) 0;
-    width: min(100%, 560px);
-    max-width: 560px;
+    width: min(100%, 680px);
+    max-width: 680px;
     box-sizing: border-box;
     overflow: visible;
     color: var(--text);
@@ -269,15 +269,15 @@ st.markdown("""
     box-sizing: border-box;
   }
   .pcard {
-    background: transparent;
-    border: 0;
-    border-radius: 0;
+    background: var(--surface-2);
+    border: 1px solid var(--border-2);
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
     padding: 0;
     margin: 0;
-    width: 100%;
-    max-width: 100%;
+    width: min(100%, 680px);
+    max-width: 680px;
     color: var(--text);
-    overflow: visible;
+    overflow: hidden;
     min-width: 0;
   }
   .pcard-head {
@@ -285,10 +285,9 @@ st.markdown("""
     justify-content: space-between;
     gap: var(--space-md);
     align-items: flex-start;
-    padding: 12px 14px 10px 14px;
-    background: oklch(0.965 0.018 150);
+    padding: 16px 18px 14px 18px;
+    background: oklch(0.972 0.014 150);
     border-bottom: 1px solid var(--border);
-    border-radius: calc(var(--radius-sm) - 1px) calc(var(--radius-sm) - 1px) 0 0;
     min-width: 0;
     max-width: 100%;
   }
@@ -297,8 +296,8 @@ st.markdown("""
     max-width: 100%;
   }
   .pcard-name {
-    font-size: 0.95rem;
-    line-height: 1.25;
+    font-size: 1.05rem;
+    line-height: 1.22;
     font-weight: 700;
     color: var(--text);
     display: block;
@@ -310,18 +309,19 @@ st.markdown("""
   }
   .pcard-meta {
     font-family: var(--mono);
-    font-size: 0.72rem;
+    font-size: 0.74rem;
     color: var(--text-muted);
-    margin-top: var(--space-2xs);
+    margin-top: 5px;
     overflow-wrap: anywhere;
   }
   .pcard-code {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    margin-top: 6px;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin-top: 9px;
     color: var(--text-muted);
-    font-size: 0.7rem;
+    font-size: 0.72rem;
   }
   .pcard-code b {
     color: var(--text);
@@ -329,17 +329,18 @@ st.markdown("""
   }
   .pcard-chip {
     flex: 0 0 auto;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 3px 7px;
-    font-size: 0.64rem;
+    border: 1px solid oklch(0.58 0.135 150 / 0.28);
+    border-radius: 999px;
+    padding: 4px 9px;
+    font-size: 0.66rem;
     font-weight: 600;
-    color: var(--text-muted);
-    background: var(--surface);
+    color: oklch(0.40 0.08 150);
+    background: var(--accent-soft);
+    white-space: nowrap;
   }
   .pcard-rule { height: 1px; background: var(--border); margin: 0; }
   .pcard-body {
-    padding: 10px 14px;
+    padding: 14px 18px 16px 18px;
     min-width: 0;
     max-width: 100%;
     overflow: visible;
@@ -347,7 +348,7 @@ st.markdown("""
   .pcard-detail-grid {
     display: grid;
     grid-template-columns: 1fr;
-    gap: 8px;
+    gap: 11px;
     min-width: 0;
     max-width: 100%;
     overflow: visible;
@@ -360,7 +361,7 @@ st.markdown("""
   .pcard-row .lbl {
     display: block;
     color: var(--text-muted);
-    font-size: 0.68rem;
+    font-size: 0.66rem;
     line-height: 1.2;
     min-width: 0;
     margin-bottom: 4px;
@@ -369,7 +370,7 @@ st.markdown("""
   }
   .pcard-row .val {
     color: var(--text);
-    font-size: 0.76rem;
+    font-size: 0.8rem;
     min-width: 0;
     max-width: 100%;
     text-align: left;
@@ -389,23 +390,44 @@ st.markdown("""
   .pcard-prices {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0;
+    gap: 1px;
+    background: var(--border);
     border-bottom: 1px solid var(--border);
   }
   .pcard-price {
     min-width: 0;
-    padding: 9px 14px;
+    padding: 12px 18px;
+    background: oklch(0.988 0.005 150);
   }
-  .pcard-price.group { border-left: 1px solid var(--border); }
-  .pcard-price .plbl { font-size: 0.68rem; color: var(--text-muted); }
-  .pcard-price .pval { font-family: var(--mono); font-size: 1rem; font-weight: 700; margin-top: 2px; }
-  .pcard-price.single .pval { color: var(--text); }
-  .pcard-price.group  .pval { color: var(--warn); }
-  .pcard-action-title {
-    font-size: 0.74rem;
+  .pcard-price.group { border-left: 0; }
+  .pcard-price .plbl {
+    font-size: 0.68rem;
     color: var(--text-muted);
     font-weight: 600;
-    margin: 10px 14px 6px 14px;
+  }
+  .pcard-price .pval {
+    font-family: var(--mono);
+    font-size: 1.08rem;
+    font-weight: 700;
+    margin-top: 3px;
+  }
+  .pcard-price.single .pval { color: var(--text); }
+  .pcard-price.group  .pval { color: var(--warn); }
+  [class*="st-key-product_actions_"] {
+    width: min(100%, 680px);
+    max-width: 680px;
+    margin: -1px 0 var(--space-sm) 0;
+    padding: 13px 18px 16px 18px;
+    background: oklch(0.982 0.006 150);
+    border: 1px solid var(--border-2);
+    border-top: 0;
+    border-radius: 0 0 var(--radius-md) var(--radius-md);
+  }
+  .pcard-action-title {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    font-weight: 600;
+    margin: 0 0 8px 0;
   }
   .pcard-buy-note,
   .pcard-position {
@@ -415,12 +437,26 @@ st.markdown("""
     text-align: center;
     margin-top: 6px;
   }
+  [class*="st-key-product_actions_"] .pcard-buy-note {
+    text-align: left;
+    margin: 6px 0 0 0;
+  }
   [class*="st-key-product_card_"] .stNumberInput input {
     min-height: 38px !important;
     text-align: center !important;
     font-family: var(--mono) !important;
   }
-  [class*="st-key-product_card_"] .stButton > button {
+  [class*="st-key-product_actions_"] .stNumberInput input {
+    min-height: 40px !important;
+    text-align: center !important;
+    font-family: var(--mono) !important;
+  }
+  [class*="st-key-product_actions_"] [data-testid="stNumberInput"] label {
+    color: var(--text-muted) !important;
+    font-size: 0.72rem !important;
+    font-weight: 600 !important;
+  }
+  [class*="st-key-product_actions_"] .stButton > button {
     min-height: 38px !important;
     padding: 8px 12px !important;
     white-space: normal !important;
@@ -433,22 +469,58 @@ st.markdown("""
     background: oklch(0.52 0.13 150) !important;
     border-color: oklch(0.52 0.13 150) !important;
   }
-  [class*="st-key-product_card_"] .stButton > button:disabled,
-  [class*="st-key-product_card_"] .stButton > button:disabled:hover {
+  [class*="st-key-product_actions_"] .stButton > button:hover {
+    background: oklch(0.52 0.13 150) !important;
+    border-color: oklch(0.52 0.13 150) !important;
+  }
+  [class*="st-key-product_actions_"] .stButton > button:disabled,
+  [class*="st-key-product_actions_"] .stButton > button:disabled:hover {
     background: oklch(0.90 0.006 150) !important;
     border-color: var(--border) !important;
     color: var(--text-faint) !important;
+  }
+  [class*="st-key-product_actions_"] [data-testid="column"] {
+    min-width: 0 !important;
+  }
+  [class*="st-key-product_actions_"] [data-testid="stHorizontalBlock"] {
+    padding: 0 !important;
+    gap: 0.55rem !important;
+  }
+  [class*="st-key-product_nav_"] {
+    width: min(100%, 680px);
+    max-width: 680px;
+    margin: 0 0 var(--space-md) 0;
+    padding: 0;
+  }
+  [class*="st-key-product_nav_"] [data-testid="stHorizontalBlock"] {
+    align-items: center !important;
+    gap: 0.55rem !important;
+  }
+  [class*="st-key-product_nav_"] .stButton > button {
+    min-height: 36px !important;
+    padding: 7px 10px !important;
+    border-color: var(--border) !important;
+    background: transparent !important;
+    color: var(--text-muted) !important;
+    font-weight: 600 !important;
+  }
+  [class*="st-key-product_nav_"] .stButton > button:hover {
+    background: var(--accent-soft) !important;
+    color: var(--text) !important;
+    border-color: oklch(0.58 0.135 150 / 0.35) !important;
   }
   [class*="st-key-product_card_"] [data-testid="column"] {
     min-width: 0 !important;
   }
   [class*="st-key-product_card_"] [data-testid="stHorizontalBlock"] {
-    padding: 0 14px 12px 14px !important;
+    padding: 0 !important;
   }
 
   @media (max-width: 900px) {
     .agent-bubble,
     [class*="st-key-product_card_"],
+    [class*="st-key-product_actions_"],
+    [class*="st-key-product_nav_"],
     [class*="st-key-chat_show_container"] {
       width: 100%;
     }
@@ -461,7 +533,7 @@ st.markdown("""
   @media (max-width: 640px) {
     .pcard-head {
       display: block;
-      padding: 14px;
+      padding: 15px;
     }
     .pcard-chip {
       display: inline-flex;
@@ -475,10 +547,14 @@ st.markdown("""
       border-top: 1px solid var(--border);
     }
     .pcard-body {
-      padding: 12px 14px;
+      padding: 14px 15px;
     }
-    [class*="st-key-product_card_"] [data-testid="stHorizontalBlock"] {
-      padding: 0 14px 14px 14px !important;
+    [class*="st-key-product_actions_"] {
+      padding: 13px 15px 15px 15px;
+    }
+    [class*="st-key-product_actions_"] [data-testid="stHorizontalBlock"] {
+      display: grid !important;
+      grid-template-columns: 1fr !important;
     }
   }
 
@@ -2380,8 +2456,8 @@ with col_main:
                             with st.container(key=f"product_card_{safe_card_key}"):
                                 st.markdown(_render_product_card(current_prod), unsafe_allow_html=True)
 
+                            with st.container(key=f"product_actions_{safe_card_key}"):
                                 st.markdown(
-                                    '<div class="pcard-rule"></div>'
                                     '<div class="pcard-action-title">Add to cart</div>',
                                     unsafe_allow_html=True,
                                 )
@@ -2432,8 +2508,8 @@ with col_main:
                                         unsafe_allow_html=True,
                                     )
 
-                                if len(products) > 1:
-                                    st.markdown('<div class="pcard-rule"></div>', unsafe_allow_html=True)
+                            if len(products) > 1:
+                                with st.container(key=f"product_nav_{safe_card_key}"):
                                     col_prev, col_status, col_next = st.columns(
                                         [1, 1.4, 1],
                                         gap="small",
