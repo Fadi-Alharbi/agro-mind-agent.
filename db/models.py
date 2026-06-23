@@ -49,6 +49,7 @@ class Customer(Base):
     location: Mapped[Optional[str]] = mapped_column(String(255))
     crop_type: Mapped[Optional[str]] = mapped_column(String(128))
     last_recommended_product: Mapped[Optional[str]] = mapped_column(String(32))
+    password_hash: Mapped[Optional[str]] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
     sessions: Mapped[list["Session"]] = relationship(back_populates="customer")
@@ -66,8 +67,10 @@ class Session(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True)  # UUID
     customer_id: Mapped[Optional[int]] = mapped_column(ForeignKey("customers.id"), index=True)
     last_intent: Mapped[Optional[str]] = mapped_column(String(64))
+    is_authenticated: Mapped[bool] = mapped_column(Boolean, default=False)
     started_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     last_active: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
+    ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
 
     customer: Mapped["Customer"] = relationship(back_populates="sessions")
     messages: Mapped[list["Message"]] = relationship(

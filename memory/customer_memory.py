@@ -24,6 +24,10 @@ from typing import Optional
 
 from sqlalchemy import func, select
 
+from db.customer_state import (
+    format_pesticide_memory_lines,
+    get_pesticide_memory_for_customer,
+)
 from db.engine import SessionLocal
 from db.models import Customer, Message, MessageAttachment, Session as DBSession
 
@@ -156,6 +160,8 @@ class CustomerMemory:
                 parts.append(f"- Recent issues: {'; '.join(i[:120] for i in recent_issues)}")
             if interaction_count:
                 parts.append(f"- Total interactions: {interaction_count}")
+            pesticide_memory = get_pesticide_memory_for_customer(db, self.customer_id)
+            parts.extend(format_pesticide_memory_lines(pesticide_memory))
 
             return "\n".join(parts) if len(parts) > 1 else ""
         finally:
@@ -224,6 +230,7 @@ class CustomerMemory:
                 "crop_type": customer.crop_type,
                 "location": customer.location,
                 "last_recommended_product": customer.last_recommended_product,
+                "pesticide_memory": get_pesticide_memory_for_customer(db, self.customer_id),
             }
         finally:
             db.close()

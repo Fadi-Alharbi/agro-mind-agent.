@@ -1,6 +1,7 @@
 import os
 import json
 import base64
+import re
 import threading
 import time
 from typing import Optional, Dict, Any
@@ -9,9 +10,14 @@ from langchain_core.tools import tool
 from langchain_community.vectorstores import Chroma
 
 from agent.llm import get_chat_llm, get_vision_llm, get_embeddings
-from db.customer_state import get_profile
+from db.customer_state import (
+    format_pesticide_memory_lines,
+    get_pesticide_memory_for_customer,
+    get_profile,
+)
 from memory.customer_memory import CustomerMemory
 from safety.interceptor import SafetyInterceptor
+from rag.catalog_loader import get_catalog, get_product_by_id, search_catalog
 
 # ── Profile cache ──────────────────────────────────────────────────────────────
 # get_customer_profile opens 3 separate remote MySQL connections (~5s total).
@@ -62,6 +68,7 @@ def _get_context_string_no_init(session_id: str) -> str:
         interaction_count = db.scalar(
             select(sa_func.count(Message.id)).where(Message.session_id.in_(all_session_ids))
         )
+        pesticide_memory = get_pesticide_memory_for_customer(db, sess.customer_id)
 
         parts: list[str] = ["[Customer Profile]"]
         if len(all_session_ids) > 1:
@@ -76,6 +83,7 @@ def _get_context_string_no_init(session_id: str) -> str:
             parts.append(f"- Recent issues: {'; '.join(i[:120] for i in recent_issues)}")
         if interaction_count:
             parts.append(f"- Total interactions: {interaction_count}")
+        parts.extend(format_pesticide_memory_lines(pesticide_memory))
 
         return "\n".join(parts) if len(parts) > 1 else ""
     finally:
@@ -113,6 +121,64 @@ except Exception as e:
 
 safety_interceptor = SafetyInterceptor()
 
+_PEST_PRODUCT_TERMS = (
+    "pest", "pests", "insect", "insects", "bug", "bugs", "mite", "mites",
+    "spider", "aphid", "aphids", "thrips", "scale", "leafminer",
+)
+
+_ORDER_ID_RE = re.compile(r"\bPDD\d{14}-\d+-\d+\b", re.IGNORECASE)
+_USAGE_TERMS = (
+    "how to use", "how i use", "how do i use", "use it", "use this",
+    "usage", "directions", "instruction", "instructions", "dilution",
+    "dilute", "mix", "mixed", "water ratio", "dosage", "dose",
+    "application rate", "spray rate",
+)
+
+
+def _mentions_catalog_product(message: str) -> bool:
+    """Return True when a user names a product or catalog ID directly."""
+    normalized = (message or "").casefold()
+    for token in re.findall(r"\b[A-Z]{2}\d{4}\b", message or "", flags=re.IGNORECASE):
+        if get_product_by_id(token):
+            return True
+
+    for rec in get_catalog():
+        names = (
+            rec.product_id,
+            rec.product_name,
+            rec.english_name,
+        )
+        if any(name and len(name) >= 4 and name.casefold() in normalized for name in names):
+            return True
+
+    return False
+
+
+def _local_catalog_recommendation(diagnosis: str, crop: str) -> str:
+    """Fallback recommendation from the local XLSX catalog when Chroma is unavailable."""
+    query = f"{diagnosis or ''} {crop or ''}".strip()
+    matches = search_catalog(query, max_results=8)
+    if not matches:
+        return (
+            "No suitable product found in our catalog for this specific issue. "
+            "Please identify the crop and pest or disease more specifically so a verified catalog match can be selected."
+        )
+
+    normalized = query.casefold()
+    if any(term in normalized for term in _PEST_PRODUCT_TERMS):
+        product = next(
+            (rec for rec in matches if rec.product_type.casefold() == "pesticide"),
+            matches[0],
+        )
+    else:
+        product = matches[0]
+
+    return (
+        "Based on the catalog match, this issue can be handled with a suitable verified product. "
+        "Follow the product label and avoid spraying during high heat or windy conditions. "
+        f"[PRODUCT: {product.product_id}]"
+    )
+
 @tool
 def classify_intent(message: str) -> str:
     """
@@ -120,6 +186,13 @@ def classify_intent(message: str) -> str:
     Uses fast keyword matching — no LLM call needed.
     """
     msg_lower = message.lower()
+    usage_question = any(term in msg_lower for term in _USAGE_TERMS)
+
+    if usage_question and (_ORDER_ID_RE.search(message) or _mentions_catalog_product(message)):
+        return "Product"
+
+    if _ORDER_ID_RE.search(message) and not usage_question:
+        return "Logistics"
 
     _LOGISTICS = [
         "order", "shipping", "delivery", "track", "courier", "refund", "return",
@@ -140,7 +213,9 @@ def classify_intent(message: str) -> str:
         "recommend", "which product", "buy", "purchase", "price", "dosage",
         "how much", "effective", "best product", "what to use", "herbicide",
         "pesticide", "fungicide", "insecticide", "treatment for", "what medicine",
-        "which medicine", "what chemical", "suggest",
+        "which medicine", "what chemical", "suggest", "how to use", "how i use",
+        "use it", "use this", "usage", "directions", "dilution", "dilute",
+        "mix", "water ratio",
     ]
     _PRODUCT_REQUEST_PHRASES = [
     "which product",
@@ -223,8 +298,11 @@ def recommend_product(diagnosis: str, crop: str) -> str:
     query = f"treatment fungicide pesticide for {crop} disease {diagnosis}"
     raw_results = retrieve_agronomy_knowledge.invoke(query)
     
-    if "No matching products found" in raw_results:
-        return raw_results
+    if (
+        "Knowledge base unavailable" in raw_results
+        or "No matching products found" in raw_results
+    ):
+        return _local_catalog_recommendation(diagnosis, crop)
         
     llm = get_chat_llm(temperature=0)
     MASTER_SYSTEM_INSTRUCTIONS = """You are an agricultural AI support agent.

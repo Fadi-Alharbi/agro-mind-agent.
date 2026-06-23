@@ -9,7 +9,7 @@ from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage
 
 from agent.llm import get_chat_llm
-from db.customer_state import get_order_context
+from db.customer_state import get_order, get_order_context, get_pesticide_memory
 from memory.customer_memory import CustomerMemory
 from agent.tools import (
     classify_intent,
@@ -30,6 +30,14 @@ from agent.web_context import (
 # Backward-compatible alias used by older tests. In production this still
 # returns the Qwen/DashScope-configured LangChain client from agent.llm.
 ChatOpenAI = get_chat_llm
+
+_ORDER_ID_RE = re.compile(r"\bPDD\d{14}-\d+-\d+\b", re.IGNORECASE)
+_USAGE_TERMS = (
+    "how to use", "how i use", "how do i use", "use it", "use this",
+    "usage", "directions", "instruction", "instructions", "dilution",
+    "dilute", "mix", "mixed", "water ratio", "dosage", "dose",
+    "application rate", "spray rate",
+)
 
 # Return contract expected by backend
 class AgentResponse:
@@ -146,6 +154,119 @@ async def _llm_content(llm, prompt: str) -> str:
     except TypeError:
         pass
     return llm.invoke(prompt).content
+
+
+def _extract_order_id(message: str) -> Optional[str]:
+    match = _ORDER_ID_RE.search(message or "")
+    return match.group(0) if match else None
+
+
+def _is_usage_question(message: str) -> bool:
+    normalized = (message or "").casefold()
+    return any(term in normalized for term in _USAGE_TERMS)
+
+
+def _find_catalog_product_in_text(message: str):
+    from rag.catalog_loader import get_catalog, get_product_by_id
+
+    raw = message or ""
+    normalized = raw.casefold()
+
+    for token in re.findall(r"\b[A-Z]{2}\d{4}\b", raw, flags=re.IGNORECASE):
+        product = get_product_by_id(token)
+        if product:
+            return product
+
+    products = sorted(
+        get_catalog(),
+        key=lambda rec: max(len(rec.product_name or ""), len(rec.english_name or "")),
+        reverse=True,
+    )
+    for product in products:
+        for name in (product.product_name, product.english_name):
+            if name and len(name) >= 4 and name.casefold() in normalized:
+                return product
+
+    return None
+
+
+def _resolve_usage_product(state: AgentState):
+    from rag.catalog_loader import get_product_by_id
+
+    order_id = state.get("order_id") or _extract_order_id(state.get("message", ""))
+    if order_id:
+        try:
+            order = get_order(state["session_id"], None, order_id)
+        except ValueError:
+            return None, f"Order {order_id} was not found for this customer."
+
+        product_id = order.get("product_id")
+        product = get_product_by_id(product_id) if product_id else None
+        if product:
+            return product, None
+        return None, f"Order {order_id} does not have a catalog product attached."
+
+    product = _find_catalog_product_in_text(state.get("message", ""))
+    if product:
+        return product, None
+
+    try:
+        memory = get_pesticide_memory(state["session_id"], None)
+    except Exception:
+        memory = {}
+    remembered = memory.get("current") if isinstance(memory, dict) else None
+    remembered_product_id = remembered.get("product_id") if remembered else None
+    if remembered_product_id:
+        product = get_product_by_id(remembered_product_id)
+        if product:
+            return product, None
+
+    return None, None
+
+
+def _format_product_usage(product) -> str:
+    name = product.english_name or product.product_name
+    lines = [
+        f"Usage for {name} ({product.product_id}):",
+    ]
+
+    if product.main_ingredients:
+        lines.append(f"Active ingredient: {product.main_ingredients}")
+    if product.water_ratio:
+        lines.append(f"Dilution: {product.water_ratio}.")
+
+    how_to = product.how_to_use or ""
+    if "Dilute 1000-1500 times" in how_to:
+        lines.append("For citrus spider mites: dilute 1000-1500 times and spray.")
+    elif how_to:
+        first_instruction = next(
+            (line.strip() for line in how_to.splitlines() if line.strip() and not line.startswith("|")),
+            "",
+        )
+        if first_instruction:
+            lines.append(f"Label direction: {first_instruction}")
+
+    if "underside of the leaves" in how_to:
+        lines.append("Spray evenly and thoroughly, especially the underside of leaves.")
+    if "windy days" in how_to or "rain is expected" in how_to:
+        lines.append("Do not spray on windy days or when rain is expected within 1 hour.")
+    if "safe interval" in how_to and "21 days" in how_to:
+        lines.append("For citrus, keep a 21-day pre-harvest safety interval.")
+    if "maximum number of uses per season is once" in how_to:
+        lines.append("Do not use more than once per season on citrus.")
+
+    lines.append(
+        "Wear protective gloves/clothing, avoid high heat, and follow the physical product label if it differs from this catalog record."
+    )
+    return "\n".join(lines)
+
+
+_UNKNOWN_USAGE_PRODUCT_MESSAGE = (
+    "Which product are you asking about? Please send the product name, catalog code, "
+    "order ID, or select the product first so I can give the exact mixing ratio. "
+    "Do not guess dilution rates across medicines."
+)
+
 
 # --- Graph Nodes ---
 
@@ -266,6 +387,14 @@ User message: {state['message']}"""
     return {"response_text": final_text}
 
 def product_node(state: AgentState):
+    if _is_usage_question(state["message"]):
+        product, error = _resolve_usage_product(state)
+        if error:
+            return {"response_text": error}
+        if product:
+            return {"response_text": _format_product_usage(product)}
+        return {"response_text": _UNKNOWN_USAGE_PRODUCT_MESSAGE}
+
     recommendation = recommend_product.invoke({"diagnosis": state["message"], "crop": state["message"]})
     
     if "No suitable product found" in recommendation:
@@ -572,16 +701,6 @@ class AgroMindAgent:
         if final_state.get("response_text"):
             mem.append_turn("assistant", final_state.get("response_text", ""))
 
-        _raw_text = final_state.get("response_text", "")
-        _intent   = final_state.get("intent", "")
-        if _intent in ("Diagnosis", "Product") and "No suitable product found" not in _raw_text:
-            # Run in a background thread to prevent blocking the user's response
-            threading.Thread(
-                target=_save_treatment_in_background,
-                args=(session_id, _raw_text, user_text),
-                daemon=True
-            ).start()
-
         # Attach a product card ONLY for an explicit recommendation.
         # The recommend_product tool marks a genuine pick with "Product ID: X".
         # Plain catalog IDs mentioned inside general advice (e.g. dilution
@@ -646,21 +765,19 @@ class AgroMindAgent:
         text path). Nodes that use sync tools (product_node, image diagnosis)
         yield no tokens — their full response arrives in the metadata event.
         """
-        # Prepare the user-turn save closure (started AFTER first token to avoid
-        # GIL contention with the asyncio event loop during the LLM call).
-        _user_turn_started = False
-        _user_turn_fn = None
+        # Persist the user turn before the agent runs so reopening the session
+        # immediately still shows the user's message.
         if user_text != "INIT_SESSION":
             image_b64 = base64.b64encode(image_bytes).decode("utf-8") if image_bytes else None
-            def _user_turn_fn(_sid=session_id, _txt=user_text, _b64=image_b64, _img=image_bytes):
-                try:
-                    _session_memory(_sid).append_turn(
-                        "user", _txt,
-                        has_image=_img is not None,
-                        image_base64=_b64,
-                    )
-                except Exception:
-                    pass
+            try:
+                _session_memory(session_id).append_turn(
+                    "user",
+                    user_text,
+                    has_image=image_bytes is not None,
+                    image_base64=image_b64,
+                )
+            except Exception:
+                pass
 
         initial_state = {
             "session_id": session_id,
@@ -691,18 +808,9 @@ class AgroMindAgent:
                 msg_chunk, _ = data
                 content = getattr(msg_chunk, "content", "") or ""
                 if content:
-                    # Defer user-turn DB save until after the first token so the
-                    # background thread's GIL activity doesn't delay token delivery.
-                    if not _user_turn_started and _user_turn_fn:
-                        _user_turn_started = True
-                        threading.Thread(target=_user_turn_fn, daemon=True).start()
                     yield {"type": "token", "content": content}
             else:  # "values" — complete state snapshot; last one is final
                 final_state = data
-
-        # If no tokens streamed (product/logistics nodes), start DB save now.
-        if not _user_turn_started and _user_turn_fn:
-            threading.Thread(target=_user_turn_fn, daemon=True).start()
 
         # ── Post-processing (mirrors run()) ────────────────────────────────
         if final_state.get("response_text"):
@@ -713,14 +821,6 @@ class AgroMindAgent:
             ).start()
 
         _raw_text = final_state.get("response_text", "")
-        _intent   = final_state.get("intent", "")
-        if _intent in ("Diagnosis", "Product") and "No suitable product found" not in _raw_text:
-            threading.Thread(
-                target=_save_treatment_in_background,
-                args=(session_id, _raw_text, user_text),
-                daemon=True,
-            ).start()
-
         text = _raw_text
         from rag.catalog_loader import get_product_by_id
         products = []

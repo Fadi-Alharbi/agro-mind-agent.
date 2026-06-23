@@ -114,6 +114,9 @@ def _migrate_existing_schema() -> None:
     add_column("orders", "shipped_from", "VARCHAR(255)")
     add_column("orders", "estimated_delivery", "VARCHAR(64)")
     add_column("follow_ups", "diagnosis_id", int_nullable)
+    add_column("customers", "password_hash", "VARCHAR(255)")
+    add_column("sessions", "is_authenticated", "BOOLEAN DEFAULT 0")
+    add_column("sessions", "ended_at", "DATETIME NULL" if _is_mysql else "DATETIME")
     # New treatment columns for daily task tracking
     add_column("treatments", "quantity_per_dose", "VARCHAR(128)")
     add_column("treatments", "daily_tasks", "TEXT")
